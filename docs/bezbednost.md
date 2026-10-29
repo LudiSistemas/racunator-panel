@@ -93,6 +93,11 @@ Svi nalozi vide sve korisnike — panel je zamišljen za jednu kancelariju. Svak
   `0` = bez dnevnog limita). Kad korisnik pređe pola dnevnog limita i kad ga dostigne, to se jednom dnevno upisuje u
   **Dnevnik radnji** — neobično mnogo računa može da znači da je ključ procureo. Svaki račun se proverava (oblik PFR
   broja, link mora biti na `https://suf.purs.gov.rs/`, datum, iznos, PIB od 9 cifara); ostalo se odbija.
+- **API za knjigovođu** (ako je uključen) ima sopstvenu nasumičnu adresu (`/api/<32 znaka>/v1`) i ključ od 256 bita
+  (u bazi samo SHA-256 heš i prefiks) i samo čita podatke. Isključen API, pogrešna adresa i pogrešan ključ daju isti 401.
+  Posle 10 promašaja ključa sa iste adrese u 15 minuta adresa je blokirana do isteka prozora (i za ispravan ključ), a svaki
+  promašaj se upisuje u dnevnik radnji; ograničenje je 120 zahteva u minutu. Ključ čuvajte kao lozinku; ako procuri —
+  **Nov ključ** ili **Isključi API**.
 - Panel **ne proverava račune kod Poreske uprave** — prikazuje ono što aplikacija pošalje. Za proveru pojedinačnog računa
   koristite dugme „Otvori na sajtu Poreske uprave".
 

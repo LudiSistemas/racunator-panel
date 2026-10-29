@@ -34,6 +34,8 @@ Fiksni ugovori (ne menjati bez dogovora): `src/Kernel/*`, `src/Models/*`, `src/R
 | GET | `/health` | Jezgro | `{"ok":true}`; verzija samo prijavljenom adminu ili uz zaglavlje `App::HEALTH_TOKEN_HEADER` sa `App::healthToken(app_key)` (samoprovera ažuriranja) |
 | GET | `/u/{slug}/ping` | Jezgro (API za app) | Bearer ključ; vraća `{"ok":true,"client":"Pera DOO","accountant":"Knjigovodstvo XY","api":1}` |
 | POST | `/u/{slug}/receipts` | Jezgro (API za app) | Bearer ključ; telo `{"receipts":[…]}` |
+| GET | `/api/{slug}/v1/ping`, `/clients`, `/clients/{id}/receipts?month=`, `/receipts/{id}`, `/export?month=&format=` | Jezgro (API za knjigovođu, `AccountantApiController`) | Bearer ključ knjigovođe iz settings; samo čitanje; vidi docs/api.md |
+| GET | `/podesavanja/api/openapi.yaml` | Panel | preuzimanje `docs/openapi.yaml` (prijavljen nalog) |
 
 ## API za aplikaciju (v1)
 Zaglavlja: `Authorization: Bearer <ključ>`, `Content-Type: application/json`, `X-Racunator-Api: 1`.

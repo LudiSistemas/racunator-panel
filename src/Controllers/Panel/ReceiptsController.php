@@ -7,13 +7,11 @@ use RacunatorPanel\Kernel\Request;
 use RacunatorPanel\Kernel\Response;
 use RacunatorPanel\Models\Client;
 use RacunatorPanel\Models\Receipt;
+use RacunatorPanel\Services\ReceiptCsv;
 
 /** Računi jednog korisnika po mesecu (tabela i CSV). */
 final class ReceiptsController extends BaseController
 {
-    private const CHUNK = 1000;
-    private const MAX_ROWS = 50000;
-
     public function index(Request $request, array $params = []): Response
     {
         if ($deny = $this->requireUser()) {
@@ -71,60 +69,18 @@ final class ReceiptsController extends BaseController
     }
 
     /**
-     * CSV za Excel u srpskom okruženju: UTF-8 sa BOM-om, razdvajač `;`, decimalni zarez, redovi CRLF.
-     * Poslednja kolona „Izvor": „QR" (račun iz QR koda) ili „PFR broj" (unet po PFR broju, link je stranica /verify).
+     * CSV za Excel u srpskom okruženju (zajednički kod: `Services\ReceiptCsv`); poslednja kolona „Izvor" (QR / PFR broj).
      * @param list<Receipt> $receipts
      */
     public static function buildCsv(array $receipts): string
     {
-        $out = fopen('php://temp', 'r+');
-        if ($out === false) {
-            throw new \RuntimeException('Nije moguće napraviti CSV.');
-        }
-        fwrite($out, "\xEF\xBB\xBF");
-        $row = static function (array $fields) use ($out): void {
-            fputcsv($out, $fields, ';', '"', '', "\r\n");
-        };
-        $row(['Datum', 'Prodavac', 'PIB prodavca', 'PIB kupca', 'Iznos', 'PFR broj', 'Vrsta računa', 'Vrsta transakcije', 'Link za proveru', 'Izvor']);
-        foreach ($receipts as $r) {
-            $row([
-                Format::sdcDateTime($r->sdcDateTime, 'd.m.Y H:i:s'),
-                self::safeCell((string) $r->sellerName),
-                self::safeCell((string) $r->sellerPib),
-                self::safeCell((string) $r->buyerPib),
-                Format::amount($r->totalAmountMinor, false),
-                self::safeCell($r->invoiceNumber),
-                self::safeCell(Format::invoiceType($r->invoiceType)),
-                self::safeCell(Format::transactionType($r->transactionType)),
-                self::safeCell($r->verificationUrl),
-                Format::receiptSource($r->source),
-            ]);
-        }
-        rewind($out);
-        $csv = (string) stream_get_contents($out);
-        fclose($out);
-        return $csv;
-    }
-
-    /** Zaštita od „CSV injection": tekst koji počinje znakom formule dobija apostrof ispred. */
-    private static function safeCell(string $value): string
-    {
-        return $value !== '' && strpbrk($value[0], "=+-@\t\r") !== false ? "'" . $value : $value;
+        return ReceiptCsv::build($receipts);
     }
 
     /** @return list<Receipt> */
     private function allForMonth(int $clientId, string $month): array
     {
-        $all = [];
-        $offset = 0;
-        do {
-            $batch = $this->app->receipts->forClientMonth($clientId, $month, self::CHUNK, $offset);
-            foreach ($batch as $receipt) {
-                $all[] = $receipt;
-            }
-            $offset += self::CHUNK;
-        } while (count($batch) === self::CHUNK && $offset < self::MAX_ROWS);
-        return $all;
+        return ReceiptCsv::allForMonth($this->app->receipts, $clientId, $month);
     }
 
     private function month(Request $request): string

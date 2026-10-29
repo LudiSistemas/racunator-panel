@@ -251,4 +251,42 @@ final class UsersAndSettingsTest extends PanelTestCase
         self::assertNull($this->settings->get('accountant_api_key_hash'));
         self::assertSame(['api.enable', 'api.rotate_key', 'api.disable'], $this->audit->actions());
     }
+    public function testStranicaApiDokumentacijaIOpenApi(): void
+    {
+        // Neprijavljen: stranica i opis API-ja vode na prijavu.
+        $this->assertRedirect($this->get('/podesavanja/api'), '/panel/prijava');
+        $this->assertRedirect($this->get('/podesavanja/api/openapi.yaml'), '/panel/prijava');
+
+        $this->loginAs();
+        $off = $this->get('/podesavanja/api');
+        self::assertSame(200, $off->status);
+        self::assertStringContainsString('id="dokumentacija"', $off->body);
+        self::assertStringContainsString(self::PUBLIC_URL . '/api/&lt;slug&gt;/v1', $off->body, 'primer adrese dok je API isključen');
+        self::assertStringNotContainsString('sledećoj verziji', $off->body);
+
+        $on = $this->post('/podesavanja/api', ['radnja' => 'ukljuci']);
+        preg_match('/id="api-key" class="secret">([^<]+)</', $on->body, $m);
+        $key = html_entity_decode($m[1] ?? '', ENT_QUOTES);
+        $slug = (string) $this->settings->get('accountant_api_slug');
+        $page = $this->get('/podesavanja/api')->body;
+        foreach (['/ping', '/clients', '/clients/{id}/receipts', '/receipts/{id}', '/export?month=YYYY-MM'] as $endpoint) {
+            self::assertStringContainsString('<code>' . htmlspecialchars($endpoint, ENT_QUOTES), $page, $endpoint);
+        }
+        self::assertStringContainsString('API=&quot;' . self::PUBLIC_URL . '/api/' . $slug . '/v1&quot;', $page);
+        self::assertStringContainsString('curl -s &quot;$API/ping&quot; -H &quot;Authorization: Bearer $KLJUC&quot;', $page);
+        self::assertStringContainsString('href="/panel/podesavanja/api/openapi.yaml"', $page);
+        self::assertStringNotContainsString($key, $page, 'ceo ključ se ne prikazuje u dokumentaciji');
+
+        $yaml = $this->get('/podesavanja/api/openapi.yaml');
+        self::assertSame(200, $yaml->status);
+        self::assertStringStartsWith('application/yaml', $yaml->headers['Content-Type']);
+        self::assertStringContainsString('attachment;', $yaml->headers['Content-Disposition']);
+        self::assertStringStartsWith('openapi: 3.1.0', $yaml->body);
+        self::assertStringContainsString('/api/{slug}/v1/export', $yaml->body);
+
+        // Zaposleni ne upravlja API-jem, ali opis API-ja može da preuzme.
+        $this->loginAs(User::ROLE_STAFF, 'zaposleni1');
+        self::assertSame(403, $this->get('/podesavanja/api')->status);
+        self::assertSame(200, $this->get('/podesavanja/api/openapi.yaml')->status);
+    }
 }

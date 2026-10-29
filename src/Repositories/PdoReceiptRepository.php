@@ -83,6 +83,15 @@ final class PdoReceiptRepository implements ReceiptRepository
         return $row ? self::map($row) : null;
     }
 
+    /** Izvorni JSON računa kako ga je aplikacija poslala (ako je sačuvan, do 8 KB) — van ugovora ReceiptRepository. */
+    public function rawJson(int $id): ?string
+    {
+        $stmt = $this->pdo->prepare('SELECT raw_json FROM receipts WHERE id = ?');
+        $stmt->execute([$id]);
+        $value = $stmt->fetchColumn();
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
     public function monthlySummary(int $clientId): array
     {
         $stmt = $this->pdo->prepare('SELECT SUBSTR(sdc_datetime, 1, 7) AS m, COUNT(*) AS c, SUM(total_amount_minor) AS t'

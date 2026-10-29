@@ -1,5 +1,19 @@
 # Izmene
 
+## Neobjavljeno
+
+### API za knjigovođu
+- Read-only API na `/api/<slug>/v1` za knjigovodstvene programe: `ping`, lista korisnika, računi korisnika po mesecu sa
+  stranicama, jedan račun (opciono sa izvornim JSON-om), izvoz meseca u CSV (isti format kao u panelu) ili JSON.
+- Autentifikacija ključem knjigovođe iz podešavanja; isti 401 za isključen API, pogrešnu adresu i ključ; 120 zahteva u
+  minutu; privremena blokada adrese posle 10 promašaja ključa u 15 minuta; promašaji i izvozi u dnevniku radnji.
+- Stranica **Podešavanja → API za knjigovođu** sada ima dokumentaciju, `curl` primere i preuzimanje `openapi.yaml`.
+- Dokumentacija: odeljak „API za knjigovođu" u `docs/api.md`, nove putanje u `docs/openapi.yaml`.
+- CSV izvoz računa izdvojen u zajednički kod za panel i API; i API izvoz ima poslednju kolonu „Izvor" (QR / PFR broj),
+  a JSON računa polje `source` (`qr` | `pfr`).
+- `docs/openapi.yaml` opisuje oba API-ja; ispravljena šema računa API-ja za aplikaciju (uslov za `source: pfr` je bio
+  umetnut usred `properties`, pa polja od `sdcDateTime` nadalje nisu bila opisana).
+
 ## 0.2.0 — 2026-10-29
 
 - Prijem računa unetih u aplikaciji po PFR broju (bez QR koda): novo opciono polje `source` u API-ju (`qr` podrazumevano |

@@ -117,5 +117,73 @@ Telo greške: `{"error":"<kod>","message":"<opis na srpskom>"}`.
 dodaje samo za prijavljenog administratora i za samoproveru instalacije/ažuriranja (zaglavlje `X-Racunator-Health-Token`
 sa vrednošću `App::healthToken(app_key)` = HMAC-SHA256 od `racunator-panel/health` ključem `app_key`).
 
-## API za knjigovođu
-Planiran (faza C): `/api/<slug>/v1/…`, uključuje se u panelu. Biće opisan ovde i u `openapi.yaml`.
+## API za knjigovođu (v1, samo čitanje)
+Knjigovodstveni program ili skripta knjigovođe čita korisnike i račune iz panela. API je isključen dok ga administrator
+ne uključi u panelu (**Podešavanja → API za knjigovođu**); tada dobija nasumičnu osnovnu adresu i ključ, a na istoj stranici
+su lista poziva, `curl` primeri i preuzimanje `openapi.yaml`. Mašinski opis: putanje `/api/{slug}/v1/…` u [openapi.yaml](openapi.yaml).
+
+### Pravila
+- Osnovna adresa: `https://<panel>/api/<slug>/v1`, gde je `<slug>` 32 heksadecimalna znaka iz panela. Svako uključivanje
+  daje novu adresu i nov ključ; **Nov ključ** poništava stari odmah; **Isključi API** briše ključ.
+- Autentifikacija: `Authorization: Bearer <ključ>` (`rk_` + 43 znaka base64url, prikazuje se samo jednom). Ključ korisnika
+  (iz QR koda) ovde ne važi. Pozivati isključivo preko HTTPS-a, sa servera (CORS nije omogućen).
+- Isključen API, pogrešan slug i pogrešan ključ daju **isti** odgovor 401 `unauthorized` (ne otkriva se šta je pogrešno).
+- Posle **10 promašaja ključa** sa iste adrese (IPv6: isti /64) u 15 minuta adresa je blokirana do isteka prozora — svi
+  pozivi, i sa ispravnim ključem, dobijaju 429 `auth_blocked` sa `Retry-After`. Svaki promašaj se upisuje u dnevnik radnji
+  (`api.accountant_auth_fail`, bez ključa); uspešan poziv briše promašaje te adrese.
+- Ograničenje: **120 zahteva u minutu** za ključ knjigovođe; preko toga 429 `rate_limited` sa `Retry-After` (sekunde).
+- Svi odgovori imaju `X-Racunator-Api: 1` i `Cache-Control: no-store`. Samo `GET`; druga metoda daje 405
+  `method_not_allowed`, nepoznata putanja 404 `not_found`. Tokom ažuriranja panela 503 `maintenance`.
+- Vremena: `sdcDateTime` je vreme sa računa — lokalno (zidno) vreme PFR-a `YYYY-MM-DDTHH:MM:SS`, isto kao u aplikaciji;
+  `receivedAt`, `createdAt`, `lastSeenAt` su UTC u ISO 8601 sa `Z` (npr. `2026-10-24T19:45:02Z`). Iznosi su u parama.
+- Mesec (`month=YYYY-MM`) se određuje po `sdcDateTime`, kao u panelu.
+
+### Pozivi
+```sh
+API="https://domen.rs/panel/api/0f3c…/v1"
+KLJUC="rk_…"
+curl -s "$API/ping" -H "Authorization: Bearer $KLJUC"
+```
+
+| Poziv | Odgovor 200 |
+|---|---|
+| `GET /ping` | `{"ok":true,"accountant":"Knjigovodstvo XY","api":1}` |
+| `GET /clients` | `{"items":[{"id":12,"name":"Pera DOO","active":true,"createdAt":"2026-10-01T08:15:00Z","lastSeenAt":"2026-10-24T19:45:02Z","receiptsCount":318}]}` — svi korisnici (i deaktivirani), po nazivu; `receiptsCount` = ukupno računa |
+| `GET /clients/{id}/receipts?month=YYYY-MM&page=1&perPage=100` | `{"items":[…računi…],"month":"2026-10","page":1,"perPage":100,"total":318}` — `month` obavezan; `page` ≥ 1 (podrazumevano 1); `perPage` 1–500 (podrazumevano 100); po `sdcDateTime` rastuće; stranica posle poslednje ima prazan `items` |
+| `GET /receipts/{id}` | jedan račun; uz `?raw=1` i polje `rawJson` (JSON tekst kako ga je aplikacija poslala, do 8 KB, ili `null`) |
+| `GET /export?month=YYYY-MM&format=csv\|json&clientId=` | izvoz meseca: `csv` (podrazumevano) ili `json` (niz računa); bez `clientId` svi korisnici (po nazivu, pa po vremenu) |
+
+Račun u JSON-u:
+```json
+{"id":345,"clientId":12,"invoiceNumber":"RCVG4AFL-RCVG4AFL-234120","verificationUrl":"https://suf.purs.gov.rs/v/?vl=A1JD…",
+ "sdcDateTime":"2026-10-24T21:42:31","totalAmountMinor":123456,"sellerName":"ZORA MARKET DOO","sellerPib":"100000000",
+ "buyerPib":"101234567","invoiceType":"Normal","transactionType":"Sale","source":"qr","receivedAt":"2026-10-24T19:45:02Z"}
+```
+`source`: `qr` — račun iz QR koda; `pfr` — račun unet po PFR broju (`verificationUrl` je tada
+`https://suf.purs.gov.rs/verify`; kad isti račun kasnije stigne iz QR koda, zapis se nadograđuje u `qr`).
+
+CSV izvoz je isti kao **Preuzmi CSV** u panelu: UTF-8 sa BOM-om, razdvajač `;`, decimalni zarez, redovi CRLF, kolone
+Datum; Prodavac; PIB prodavca; PIB kupca; Iznos; PFR broj; Vrsta računa; Vrsta transakcije; Link za proveru; Izvor
+(`QR` ili `PFR broj`). Izvoz bez `clientId` ima i prvu kolonu **Korisnik**. Tekst koji počinje znakom formule (`=`, `+`,
+`-`, `@`) dobija apostrof ispred.
+Izvoz ima najviše 50000 računa (inače 413 `export_too_large` — izvezite korisnike pojedinačno) i upisuje se u dnevnik
+radnji (`api.accountant_export`).
+
+```sh
+curl -s -o racuni-2026-10.csv "$API/export?month=2026-10&format=csv" -H "Authorization: Bearer $KLJUC"
+curl -s "$API/clients/12/receipts?month=2026-10&page=2&perPage=500" -H "Authorization: Bearer $KLJUC"
+```
+
+### Greške
+Telo: `{"error":"<kod>","message":"<opis na srpskom>"}`.
+
+| Status | `error` | Kada |
+|---|---|---|
+| 400 | `invalid_parameter` | `month` nedostaje ili nije `YYYY-MM`, `page`/`perPage` van opsega, nepoznat `format` |
+| 401 | `unauthorized` | API isključen, pogrešan slug ili ključ |
+| 404 | `not_found` | korisnik ili račun ne postoji, nepoznata putanja |
+| 405 | `method_not_allowed` | metoda različita od `GET` |
+| 413 | `export_too_large` | izvoz bi imao više od 50000 računa |
+| 429 | `auth_blocked` | adresa blokirana posle 10 promašaja ključa (čekati `Retry-After`) |
+| 429 | `rate_limited` | više od 120 zahteva u minutu (čekati `Retry-After`) |
+| 503 | `maintenance` | panel se ažurira |

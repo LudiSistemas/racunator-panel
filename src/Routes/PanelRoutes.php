@@ -62,6 +62,7 @@ final class PanelRoutes
         $r->post('/podesavanja/odjava-svuda', $settings->logoutEverywhere(...));
         $r->get('/podesavanja/api', $settings->api(...));
         $r->post('/podesavanja/api', $settings->apiSave(...));
+        $r->get('/podesavanja/api/openapi.yaml', $settings->openapi(...));
 
         $audit = new AuditController($app, $services);
         $r->get('/dnevnik', $audit->index(...));

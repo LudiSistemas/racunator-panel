@@ -3,13 +3,16 @@ declare(strict_types=1);
 
 namespace RacunatorPanel\Controllers\Panel;
 
+use RacunatorPanel\Auth\ApiAuthFailLimiter;
 use RacunatorPanel\Auth\TotpSteps;
+use RacunatorPanel\Controllers\AccountantApiController;
 use RacunatorPanel\Kernel\Request;
 use RacunatorPanel\Kernel\Response;
 
 /**
  * Podešavanja: naziv knjigovodstva, javni URL i verzija (prikaz), promena lozinke, dvofaktorska prijava (TOTP),
- * „Odjavi me sa svih uređaja" i prekidač API-ja za knjigovođu (faza A: samo čuvanje podešavanja i ključa).
+ * „Odjavi me sa svih uređaja" i stranica API-ja za knjigovođu (prekidač, ključ, dokumentacija, preuzimanje openapi.yaml;
+ * sami pozivi su u `Controllers\AccountantApiController`).
  * Promena lozinke, uključivanje/isključivanje 2FA i odjava sa svih uređaja povećavaju `session_version` naloga: ostale
  * sesije tog naloga prestaju da važe, a tekuća dobija nov ID.
  *
@@ -231,6 +234,25 @@ final class SettingsController extends BaseController
         return $this->redirect('/podesavanja/api');
     }
 
+    /** Mašinski opis API-ja (docs/openapi.yaml) za preuzimanje — samo prijavljenom. */
+    public function openapi(Request $request, array $params = []): Response
+    {
+        if ($deny = $this->requireUser()) {
+            return $deny;
+        }
+        $file = $this->app->root . '/docs/openapi.yaml';
+        $body = is_file($file) ? file_get_contents($file) : false;
+        if ($body === false) {
+            return $this->notFound('Opis API-ja nije pronađen u instalaciji.');
+        }
+        return new Response(200, $body, [
+            'Content-Type' => 'application/yaml; charset=utf-8',
+            'Content-Disposition' => 'attachment; filename="racunator-panel-openapi.yaml"',
+            'Cache-Control' => 'no-store, private',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
     private function totpSteps(): TotpSteps
     {
         return new TotpSteps($this->app->settings);
@@ -307,6 +329,10 @@ final class SettingsController extends BaseController
             'keyPrefix' => (string) $settings->get('accountant_api_key_prefix', ''),
             'enabledAt' => $settings->get('accountant_api_enabled_at'),
             'newKey' => $newKey,
+            'exampleBase' => $this->app->config->publicUrl() . '/api/<slug>/v1',
+            'rateLimit' => AccountantApiController::RATE_LIMIT,
+            'perPageMax' => AccountantApiController::PER_PAGE_MAX,
+            'maxFails' => ApiAuthFailLimiter::MAX_FAILS,
             'rotateNonce' => $enabled ? $this->panelSession()->issueNonce('api-rotate') : '',
         ], 200, $newKey !== null ? ['Cache-Control' => 'no-store, private'] : []);
     }

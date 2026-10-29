@@ -65,7 +65,7 @@ curl -s localhost:8000/u/<slug>/ping -H "Authorization: Bearer rk_…"
 | `tests/Repositories` | PDO repozitorijumi |
 | `tests/Auth` | lozinke, CSRF, TOTP (RFC 6238 vektori), ograničenje prijava i API-ja, tok prijave sa 2FA |
 | `tests/Services` | slug/ključ, QR sadržaj |
-| `tests/Api` | `/u/{slug}/ping` i `/receipts` (401, validacija, duplikati, 200/413, 429), `/health`, zaglavlja, održavanje |
+| `tests/Api` | `/u/{slug}/ping` i `/receipts` (401, validacija, duplikati, 200/413, 429), API za knjigovođu `/api/{slug}/v1/…` (401, stranice, izvoz, limit i blokada), `/health`, zaglavlja, održavanje |
 
 ## Struktura
 ```
