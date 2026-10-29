@@ -1,0 +1,268 @@
+openapi: 3.1.0
+info:
+  title: Računator panel — API za aplikaciju
+  version: "1"
+  summary: Prijem računa iz aplikacije Računator
+  description: |
+    API kojim aplikacija Računator šalje knjigovođi račune sa PIB-om. Svaki korisnik ima sopstvenu adresu
+    `/u/{slug}` i sopstveni API ključ (`Authorization: Bearer rk_…`). Pogrešan ključ, nepostojeći i deaktiviran
+    korisnik daju isti odgovor 401. Ograničenje: 60 zahteva u minutu po ključu. Opis na srpskom: docs/api.md.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: https://{domen}/{putanja}
+    variables:
+      domen:
+        default: domen.rs
+      putanja:
+        default: panel
+security:
+  - kljucKorisnika: []
+paths:
+  /u/{slug}/ping:
+    get:
+      summary: Provera uparivanja
+      operationId: ping
+      parameters:
+        - $ref: "#/components/parameters/Slug"
+        - $ref: "#/components/parameters/ApiVerzija"
+      responses:
+        "200":
+          description: Ključ i adresa su ispravni.
+          headers:
+            X-Racunator-Api:
+              $ref: "#/components/headers/ApiVerzija"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ping"
+              example:
+                ok: true
+                client: Pera DOO
+                accountant: Knjigovodstvo XY
+                api: 1
+        "401":
+          $ref: "#/components/responses/Neovlascen"
+        "429":
+          $ref: "#/components/responses/PreviseZahteva"
+        "503":
+          $ref: "#/components/responses/Odrzavanje"
+  /u/{slug}/receipts:
+    post:
+      summary: Slanje računa (do 200 po zahtevu, telo do 1 MB)
+      operationId: posaljiRacune
+      parameters:
+        - $ref: "#/components/parameters/Slug"
+        - $ref: "#/components/parameters/ApiVerzija"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ZahtevRacuni"
+            example:
+              receipts:
+                - invoiceNumber: RCVG4AFL-RCVG4AFL-234120
+                  verificationUrl: https://suf.purs.gov.rs/v/?vl=A1JD...
+                  sdcDateTime: "2026-10-24T21:42:31"
+                  totalAmountMinor: 123456
+                  sellerName: ZORA MARKET DOO
+                  sellerPib: "100000000"
+                  buyerPib: "101234567"
+                  invoiceType: Normal
+                  transactionType: Sale
+      responses:
+        "200":
+          description: Obrađeno. Svaki račun je u tačno jednoj od lista.
+          headers:
+            X-Racunator-Api:
+              $ref: "#/components/headers/ApiVerzija"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OdgovorRacuni"
+              example:
+                accepted: [RCVG4AFL-RCVG4AFL-234120]
+                duplicates: []
+                rejected:
+                  - invoiceNumber: RCVG4AFL-RCVG4AFL-234121
+                    reason: "sdcDateTime: očekuje se ISO 8601, npr. 2026-10-24T21:42:31"
+        "400":
+          description: Telo nije JSON objekat oblika {"receipts":[…]} (`invalid_body`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Greska"
+        "401":
+          $ref: "#/components/responses/Neovlascen"
+        "413":
+          description: Telo veće od 1 MB (`payload_too_large`) ili više od 200 računa (`too_many_receipts`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Greska"
+        "429":
+          $ref: "#/components/responses/PreviseZahteva"
+        "503":
+          $ref: "#/components/responses/Odrzavanje"
+components:
+  securitySchemes:
+    kljucKorisnika:
+      type: http
+      scheme: bearer
+      description: API ključ korisnika iz QR koda (`rk_` + 43 znaka base64url).
+  parameters:
+    Slug:
+      name: slug
+      in: path
+      required: true
+      description: Nasumični identifikator korisnika (32 heksadecimalna znaka).
+      schema:
+        type: string
+        pattern: "^[0-9a-f]{32}$"
+    ApiVerzija:
+      name: X-Racunator-Api
+      in: header
+      required: false
+      schema:
+        type: string
+        const: "1"
+  headers:
+    ApiVerzija:
+      description: Verzija API-ja.
+      schema:
+        type: string
+        const: "1"
+  responses:
+    Neovlascen:
+      description: Pogrešan ključ, nepostojeći ili deaktiviran korisnik (isti odgovor u sva tri slučaja).
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            const: Bearer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Greska"
+          example:
+            error: unauthorized
+            message: Neispravan ključ ili adresa korisnika.
+    PreviseZahteva:
+      description: Više od 60 zahteva u minutu (`rate_limited`).
+      headers:
+        Retry-After:
+          description: Broj sekundi do sledećeg pokušaja.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Greska"
+    Odrzavanje:
+      description: Panel se ažurira (`maintenance`).
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Greska"
+  schemas:
+    Ping:
+      type: object
+      required: [ok, client, accountant, api]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        client:
+          type: string
+          description: Naziv korisnika (firme) u panelu.
+        accountant:
+          type: string
+          description: Naziv knjigovodstva.
+        api:
+          type: integer
+          const: 1
+    Racun:
+      type: object
+      required: [invoiceNumber, verificationUrl, sdcDateTime, totalAmountMinor]
+      properties:
+        invoiceNumber:
+          type: string
+          pattern: "^[A-Z0-9]{8}-[A-Z0-9]{8}-\\d{1,10}$"
+          description: PFR broj računa; jedinstven po korisniku.
+        verificationUrl:
+          type: string
+          format: uri
+          pattern: "^https://suf\\.purs\\.gov\\.rs/"
+          maxLength: 2048
+        sdcDateTime:
+          type: string
+          description: ISO 8601; čuva se lokalno vreme PFR-a do sekunde.
+          examples: ["2026-10-24T21:42:31"]
+        totalAmountMinor:
+          type: integer
+          minimum: 0
+          description: Ukupan iznos u parama.
+        sellerName:
+          type: [string, "null"]
+          maxLength: 200
+        sellerPib:
+          type: [string, "null"]
+          pattern: "^\\d{9}$"
+        buyerPib:
+          type: [string, "null"]
+          pattern: "^\\d{9}$"
+        invoiceType:
+          type: [string, "null"]
+          maxLength: 200
+        transactionType:
+          type: [string, "null"]
+          maxLength: 200
+    ZahtevRacuni:
+      type: object
+      required: [receipts]
+      properties:
+        receipts:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/Racun"
+    OdgovorRacuni:
+      type: object
+      required: [accepted, duplicates, rejected]
+      properties:
+        accepted:
+          type: array
+          items:
+            type: string
+        duplicates:
+          type: array
+          items:
+            type: string
+        rejected:
+          type: array
+          items:
+            type: object
+            required: [invoiceNumber, reason]
+            properties:
+              invoiceNumber:
+                type: [string, "null"]
+              reason:
+                type: string
+    Greska:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: [invalid_body, unauthorized, payload_too_large, too_many_receipts, rate_limited, maintenance]
+        message:
+          type: string
+
+# TODO (faza C): API za knjigovođu — base `/api/{slug}/v1`, poseban ključ, read-only:
+#   GET /clients, GET /clients/{id}/receipts?month=YYYY-MM&page=, GET /receipts/{id}, GET /export?month=&format=csv|json

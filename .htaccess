@@ -1,0 +1,37 @@
+# Računator panel — koren instalacije (npr. public_html/panel/).
+# Sve zahteve prosleđuje u public/ (front controller). Kod (src/), config.php, storage/, rezervne kopije i stare
+# verzije nikad nisu dostupni direktno preko veba. Izuzeci: čarobnjak install/ i samoraspakujući install fajl.
+# Ovaj fajl ažuriranje ne menja (ako ga prilagodite, ostaje vaš).
+Options -Indexes -MultiViews
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Authorization zaglavlje (Bearer ključ) do PHP-a i na CGI/FPM hostinzima.
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Čarobnjak za instalaciju i ručno ažuriranje (zaštićen install lock-om i prijavom administratora).
+    RewriteRule ^install(/.*)?$ - [L]
+
+    # Samoraspakujući install fajl (pri ručnom ažuriranju otprema se u ovaj folder).
+    RewriteRule ^racunator-panel-install[^/]*\.php$ - [L]
+
+    # Već prosleđeno u public/.
+    RewriteRule ^public/ - [L]
+
+    # Sve ostalo → public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+# Bez mod_rewrite-a panel ne radi; bar zabrani osetljive fajlove.
+<FilesMatch "^(config\.php.*|.*\.sqlite.*|.*\.sql|.*\.log|MANIFEST\.sha256|\.htaccess\.nova-.*)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

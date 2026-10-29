@@ -2,7 +2,8 @@
 /plans/
 # Konfiguracija i podaci instalacije
 /config.php
-/storage/
+/storage/*
+!/storage/.htaccess
 # Razvojne zavisnosti i privremeni fajlovi
 /vendor/
 /.phpunit.cache/
