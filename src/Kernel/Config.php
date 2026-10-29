@@ -11,6 +11,8 @@ namespace RacunatorPanel\Kernel;
  *   'public_url' => 'https://domen.rs/panel',  // bez završne kose crte
  *   'app_key'    => '<64 hex>',                // tajna instalacije (sesije, potpisi)
  *   'storage'    => '/apsolutna/putanja/storage',
+ *   'trusted_proxies' => ['10.0.0.0/8'],      // opciono: samo sa ovih adresa se veruje X-Forwarded-For/Proto
+ *   'force_https' => false,                   // opciono: preusmeri HTTP → HTTPS (osim /health)
  * ];
  */
 final class Config

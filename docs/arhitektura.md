@@ -14,7 +14,7 @@ Fiksni ugovori (ne menjati bez dogovora): `src/Kernel/*`, `src/Models/*`, `src/R
 - Bez frameworka i bez runtime zavisnosti. Jedina JS biblioteka: lokalna, pinovana verzija za crtanje QR koda.
 - Šabloni su PHP fajlovi u `src/Views` (`View::render`), sav izlaz kroz `e()`.
 - Sav tekst, komentari i dokumentacija na srpskom (latinica). Commitovi na srpskom.
-- Konfiguracija: `config.php` u korenu instalacije (van `public/`), oblik u `src/Kernel/Config.php`.
+- Konfiguracija: `config.php` u korenu instalacije (van `public/`), oblik u `src/Kernel/Config.php`; opcione stavke `trusted_proxies` (lista CIDR) i `force_https` (bool).
 - `storage/` (van `public/`): `backups/`, `tmp/`, `logs/`, `panel.sqlite` (ako je SQLite).
 - Baza: `src/Db/Connection.php` (PDO, `mysql`/`sqlite`), migracije `src/Db/migrations/NNNN_naziv.php` koje vraćaju SQL po drajveru;
   `Migrator::migrate()` je idempotentan i koristi tabelu `schema_version`.
@@ -27,11 +27,11 @@ Fiksni ugovori (ne menjati bez dogovora): `src/Kernel/*`, `src/Models/*`, `src/R
 | GET/POST | `/prijava`, POST `/odjava` | Panel | prijava (+ TOTP), odjava |
 | GET/POST | `/korisnici`, `/korisnici/novi`, `/korisnici/{id}`, POST `/korisnici/{id}/novi-kljuc`, POST `/korisnici/{id}/deaktiviraj` | Panel | korisnici i QR |
 | GET | `/korisnici/{id}/racuni?mesec=YYYY-MM`, `/korisnici/{id}/racuni.csv?mesec=` | Panel | računi po mesecu, CSV |
-| GET/POST | `/nalozi`, `/nalozi/novi`, POST `/nalozi/{id}/deaktiviraj`, POST `/nalozi/{id}/lozinka` | Panel (admin) | zaposleni |
-| GET/POST | `/podesavanja`, `/podesavanja/lozinka`, `/podesavanja/2fa` | Panel | podešavanja naloga i instalacije |
+| GET/POST | `/nalozi`, `/nalozi/novi`, POST `/nalozi/{id}/deaktiviraj`, `/aktiviraj`, `/lozinka`, `/resetuj-2fa` | Panel (admin) | zaposleni |
+| GET/POST | `/podesavanja`, `/podesavanja/lozinka`, `/podesavanja/2fa`, `/podesavanja/api`, POST `/podesavanja/odjava-svuda` | Panel | podešavanja naloga i instalacije, API knjigovođe, odjava sa svih uređaja |
 | GET | `/dnevnik` | Panel | dnevnik radnji |
 | GET/POST | `/azuriranje`, POST `/azuriranje/pokreni`, POST `/azuriranje/vrati` | Instalacija (UI u panelu) | provera, changelog, ažuriranje, povratak |
-| GET | `/health` | Jezgro | `{"ok":true,"version":"…"}` |
+| GET | `/health` | Jezgro | `{"ok":true}`; verzija samo prijavljenom adminu ili uz zaglavlje `App::HEALTH_TOKEN_HEADER` sa `App::healthToken(app_key)` (samoprovera ažuriranja) |
 | GET | `/u/{slug}/ping` | Jezgro (API za app) | Bearer ključ; vraća `{"ok":true,"client":"Pera DOO","accountant":"Knjigovodstvo XY","api":1}` |
 | POST | `/u/{slug}/receipts` | Jezgro (API za app) | Bearer ključ; telo `{"receipts":[…]}` |
 
@@ -44,7 +44,7 @@ Telo `POST /u/{slug}/receipts`:
   "buyerPib":"101234567","invoiceType":"Normal","transactionType":"Sale"}]}
 ```
 Odgovor 200: `{"accepted":["RCVG4AFL-RCVG4AFL-234120"],"duplicates":[],"rejected":[{"invoiceNumber":"…","reason":"…"}]}`.
-Pravila: najviše 200 računa i 1 MB po zahtevu; `invoiceNumber` oblika `XXXXXXXX-XXXXXXXX-N`; `verificationUrl` mora biti `https://suf.purs.gov.rs/…`;
+Pravila: najviše 200 računa i 1 MB po zahtevu (413 pre čitanja tela); dnevni limit prihvaćenih računa po korisniku (`api_daily_limit`, podrazumevano 2000; 429 `daily_limit`); `invoiceNumber` oblika `XXXXXXXX-XXXXXXXX-N`; `verificationUrl` mora biti `https://suf.purs.gov.rs/…`;
 401 za pogrešan ključ ili nepostojeći/neaktivan slug (isti odgovor, bez otkrivanja); 429 preko limita (60 zahteva/min po ključu); 413 za preveliko telo.
 
 ## QR za uparivanje (v1)
