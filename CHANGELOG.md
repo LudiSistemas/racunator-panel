@@ -13,6 +13,13 @@
   daljeg rada; nalozi zaposlenih nisu blokirani. Link „Uslovi korišćenja" je u podnožju panela.
 - Pun tekst uslova: `docs/uslovi-koriscenja.md` (isti tekst kao u aplikaciji Računator); link u README-u.
 
+### Dokumentacija
+- README: linkovi na sajt, stranicu za knjigovođe i uslove, zahtevi (PHP, Apache), spisak dokumentacije.
+- `docs/api.md` i `docs/panel.md`: aplikacija od verzije 1.0.3 sama preuzima pravi link računa unetog po PFR broju, pa
+  takvi računi uglavnom stižu kao `qr`; nadogradnja pfr → qr ne zavisi od ponovnog skeniranja QR koda.
+- `docs/openapi.yaml`: kolone CSV izvoza API-ja za knjigovođu (Izvor, Brojač, Nastavak); `docs/arhitektura.md`: sve rute.
+- `docs/bezbednost.md`: šta se čuva, dnevnik radnji i uloge dopunjeni API-jem za knjigovođu i uslovima korišćenja.
+
 ## 0.3.0 — 2026-10-29
 
 ### Podaci za proveru računa na stranici Poreske uprave

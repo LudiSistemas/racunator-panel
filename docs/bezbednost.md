@@ -5,9 +5,12 @@ Ovaj dokument je za **knjigovođe** koji panel koriste i za **održavaoce** koji
 [SECURITY.md](../SECURITY.md) — nikad javno.
 
 ## Šta se čuva u panelu
-- **Računi** vaših korisnika (firmi i preduzetnika): PFR broj, link za proveru, datum, iznos, prodavac i PIB-ovi.
+- **Računi** vaših korisnika (firmi i preduzetnika): PFR broj, link za proveru, datum, iznos, prodavac i PIB-ovi, vrsta
+  računa, izvor (QR kod ili unos po PFR broju) i brojač računa sa nastavkom.
 - **Korisnici**: naziv, napomena, adresa za aplikaciju i **heš** API ključa (sam ključ se ne čuva).
 - **Nalozi** knjigovodstva: korisničko ime, heš lozinke, tajna za dvofaktorsku prijavu (šifrovana), uloga.
+- **Podešavanja**: naziv knjigovodstva, prihvaćena verzija uslova korišćenja i, ako je uključen, API za knjigovođu
+  (nasumična adresa, prefiks i **heš** ključa).
 - **Dnevnik radnji** (ko je šta uradio, kada i sa koje IP adrese).
 - **config.php**: lozinka baze i tajni ključ instalacije.
 - **Rezervne kopije** (`backups/` u folderu za podatke): kopija svih fajlova (uključujući config.php) i cele baze.
@@ -77,6 +80,7 @@ važni kao lozinka za panel.
 | Sopstvena lozinka, 2FA i odjava sa svih uređaja | da | da |
 | Nalozi (dodavanje, deaktivacija, nova lozinka, reset 2FA drugom nalogu) | ne | da |
 | Izmena naziva knjigovodstva, API za knjigovođu | ne | da |
+| Prihvatanje izmenjenih uslova korišćenja (obavezno pre daljeg rada) | ne (nije blokiran) | da |
 | Ažuriranje, povratak verzije, preuzimanje rezervnih kopija | ne | da |
 
 Svi nalozi vide sve korisnike — panel je zamišljen za jednu kancelariju. Svaki zaposleni treba da ima **svoj** nalog
@@ -92,21 +96,24 @@ Svi nalozi vide sve korisnike — panel je zamišljen za jednu kancelariju. Svak
   memoriju), i najviše **2000 prihvaćenih računa dnevno** po korisniku (podešavanje `api_daily_limit` u tabeli `settings`;
   `0` = bez dnevnog limita). Kad korisnik pređe pola dnevnog limita i kad ga dostigne, to se jednom dnevno upisuje u
   **Dnevnik radnji** — neobično mnogo računa može da znači da je ključ procureo. Svaki račun se proverava (oblik PFR
-  broja, link mora biti na `https://suf.purs.gov.rs/`, datum, iznos, PIB od 9 cifara); ostalo se odbija.
+  broja, link mora biti na `https://suf.purs.gov.rs/` — za račun unet po PFR broju tačno `https://suf.purs.gov.rs/verify`,
+  datum, iznos, PIB od 9 cifara, oblik brojača i nastavka); ostalo se odbija.
 - **API za knjigovođu** (ako je uključen) ima sopstvenu nasumičnu adresu (`/api/<32 znaka>/v1`) i ključ od 256 bita
   (u bazi samo SHA-256 heš i prefiks) i samo čita podatke. Isključen API, pogrešna adresa i pogrešan ključ daju isti 401.
   Posle 10 promašaja ključa sa iste adrese u 15 minuta adresa je blokirana do isteka prozora (i za ispravan ključ), a svaki
   promašaj se upisuje u dnevnik radnji; ograničenje je 120 zahteva u minutu. Ključ čuvajte kao lozinku; ako procuri —
   **Nov ključ** ili **Isključi API**.
 - Panel **ne proverava račune kod Poreske uprave** — prikazuje ono što aplikacija pošalje. Za proveru pojedinačnog računa
-  koristite dugme „Otvori na sajtu Poreske uprave".
+  koristite dugme „Otvori na sajtu Poreske uprave" (za račun unet po PFR broju „Proveri na sajtu Poreske uprave" i
+  podatke iz bloka „Podaci za proveru").
 
 ### Prikaz i izvoz podataka
 - Sve što stiže spolja (nazivi prodavaca, napomene, podaci iz aplikacije) prikazuje se kao običan tekst, nikad kao HTML.
   Stroga politika sadržaja (CSP) dodatno zabranjuje izvršavanje bilo kakvih skripti osim panelovih.
 - CSV izvoz je zaštićen od „formula u Excel-u": tekst koji počinje znakom `=`, `+`, `-` ili `@` dobija apostrof ispred,
   pa ga Excel prikazuje kao tekst, a ne izvršava kao formulu.
-- Link „Otvori na sajtu Poreske uprave" se prikazuje samo za adrese na `https://suf.purs.gov.rs/`.
+- Link „Otvori na sajtu Poreske uprave" se prikazuje samo za adrese na `https://suf.purs.gov.rs/`; „Proveri na sajtu
+  Poreske uprave" uvek vodi na fiksnu adresu `https://suf.purs.gov.rs/verify`.
 
 ### Verzija panela
 - Tačnu verziju vide samo prijavljeni (podnožje stranice, Podešavanja). Provera rada `/health` neprijavljenima vraća samo
@@ -115,8 +122,9 @@ Svi nalozi vide sve korisnike — panel je zamišljen za jednu kancelariju. Svak
 
 ### Dnevnici
 - **Dnevnik radnji** u panelu beleži prijave, odjave, izmene korisnika i naloga, nove ključeve, izvoze, 2FA (uključivanje,
-  isključivanje, reset od strane administratora), odjave sa svih uređaja, dnevni limit API-ja, ažuriranja i preuzimanja
-  rezervnih kopija.
+  isključivanje, reset od strane administratora), odjave sa svih uređaja, dnevni limit API-ja, API za knjigovođu
+  (uključivanje, nov ključ, isključivanje, promašaji ključa, izvozi), prihvatanje uslova korišćenja, ažuriranja i
+  preuzimanja rezervnih kopija.
 - Ključevi, lozinke i kodovi se **nikad** ne upisuju u dnevnik radnji ni u log grešaka. Log grešaka
   (`storage/logs/error.log`) sadrži tip greške i mesto u kodu, bez vrednosti argumenata; posetilac vidi samo kratku poruku.
 

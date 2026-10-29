@@ -40,7 +40,9 @@ Tek kad štiklirate „Razumem" i kliknete **Potvrđujem**, panel bilo šta preu
    je u paketu pod imenom `htaccess.dist`, pa ništa iz raspakovanog paketa nije dostupno preko veba.
 7. **Zamena**: direktorijumi `public/`, `src/`, `install/`, `docs/` se preimenovanjem premeštaju u `_old/`, a novi dolaze na
    njihovo mesto. Preimenovanje je trenutno, pa nema trenutka u kom je panel „pola star, pola nov".
-8. **Migracije baze** (samo dodavanje, nikad brisanje podataka) i upis nove verzije.
+8. **Migracije baze** (samo dodavanje, nikad brisanje podataka; npr. 0004 — izvor računa, 0005 — brojač računa) i upis
+   nove verzije. Kad su fajlovi zamenjeni ručno, bez ažuriranja, iste migracije primenjuje `php install/cli.php migracije`
+   (vidi „Ručno ažuriranje").
 9. **Samoprovera**: panel pozove sopstveni `/health` i proveri da odgovara novom verzijom.
 10. **Kraj održavanja**, brisanje privremenih fajlova; čuvaju se poslednje tri rezervne kopije.
 

@@ -5,6 +5,7 @@ Paketi se potpisuju Ed25519 ključem; panel ima javni ključ u kodu i odbija pak
 1. `php tools/generate-signing-key.php` (potrebna ekstenzija sodium) ispisuje par ključeva.
    Bezbednije: `php tools/generate-signing-key.php --out ~/racunator-signing.key` upisuje privatni ključ samo u fajl (0600) i na ekranu prikazuje samo javni, pa ga postavite sa `gh secret set RELEASE_SIGNING_KEY --env release < ~/racunator-signing.key` (vidi korak 3) i fajl obrišite.
 2. Javni ključ upišite u `src/Services/ReleaseChecker.php` → konstanta `PUBLIC_KEY` (umesto `ZAMENITI-JAVNIM-KLJUCEM`).
+   Urađeno: javni ključ je upisan, a `RELEASE_SIGNING_KEY` je u environment-u `release` (izdanja 0.1.0–0.3.0 su potpisana).
 3. Privatni ključ upišite u GitHub kao **secret environment-a `release`** (ne kao repo secret): repo → *Settings →
    Environments → New environment* → ime **`release`** → *Environment secrets → Add secret*, ime **`RELEASE_SIGNING_KEY`**.
    Sačuvajte ga i u menadžeru lozinki. (Komandom: `gh secret set RELEASE_SIGNING_KEY --env release < ~/racunator-signing.key`.)
@@ -15,7 +16,17 @@ Paketi se potpisuju Ed25519 ključem; panel ima javni ključ u kodu i odbija pak
 Dok je `PUBLIC_KEY` placeholder, workflow izdanja odbija da objavi (instalacije ne bi mogle da provere potpis).
 
 ## Jednom: zaštita u GitHub-u (ručno podešavanje)
-Workflow je bezbedan samo ako niko ne može da pokrene izdanje mimo održavaoca:
+Workflow je bezbedan samo ako niko ne može da pokrene izdanje mimo održavaoca.
+
+Stanje na dan 2026-10-29 (repo `LudiSistemas/racunator-panel` je javan):
+- **urađeno** — tačka 1: environment `release` traži odobrenje održavaoca (*Required reviewers*: `LudiSistemas`), a
+  *Deployment branches and tags* dozvoljava samo tagove `v*`;
+- **urađeno** — tačka 2: tag ruleset „Izdanja" (*Active*, `refs/tags/v*`, *Restrict creations/updates/deletions*,
+  zaobilaženje samo za ulogu *Repository admin*);
+- **delimično** — tačka 4: podrazumevani token je samo za čitanje (*Read repository contents*), ali su dozvoljene sve
+  akcije (*Allow all actions*), ne samo izabrane;
+- **nije podešeno** — tačka 3: grana `main` nema zaštitu (ni ruleset ni branch protection).
+
 1. **Environment `release` sa obaveznim odobrenjem**: *Settings → Environments → release* → *Deployment protection rules* →
    uključite **Required reviewers** i dodajte održavaoca (sebe); po želji *Prevent self-review* ako ima više održavalaca.
    U *Deployment branches and tags* izaberite *Selected branches and tags* i dodajte pravilo za tagove **`v*`**. Posao

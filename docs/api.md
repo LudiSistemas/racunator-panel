@@ -1,9 +1,15 @@
-# API za aplikaciju Računator (v1)
+# API-ji Računator panela
+
+Panel ima dva API-ja: **API za aplikaciju** (`/u/<slug>`, ovaj odeljak) — aplikacija Računator njime šalje račune — i
+**API za knjigovođu** (`/api/<slug>/v1`, samo čitanje, [niže](#api-za-knjigovođu-v1-samo-čitanje)) za knjigovodstvene
+programe. Oba su opisana i u [openapi.yaml](openapi.yaml).
+
+## API za aplikaciju Računator (v1)
 
 Aplikacija Računator posle skeniranja QR koda šalje knjigovođi račune preko dva poziva. Svaki korisnik (firma/preduzetnik)
 ima svoju adresu `https://<panel>/u/<slug>` i svoj API ključ. Mašinski opis: [openapi.yaml](openapi.yaml).
 
-## Uparivanje (QR kod)
+### Uparivanje (QR kod)
 Panel prikazuje QR kod sa JSON sadržajem:
 ```json
 {"v":1,"t":"racunator-knjigovodja","endpoint":"https://domen.rs/panel/u/0f3c…","name":"Pera DOO","key":"rk_…","accountant":"Knjigovodstvo XY"}
@@ -13,7 +19,7 @@ Panel prikazuje QR kod sa JSON sadržajem:
   Posle „Nov ključ" u panelu stari ključ odmah prestaje da važi.
 - `t` uvek `racunator-knjigovodja` (razlikuje ovaj QR od fiskalnog).
 
-## Zajednička pravila
+### Zajednička pravila
 - Autentifikacija: `Authorization: Bearer <ključ>`. Pozivati isključivo preko HTTPS-a.
 - Telo i odgovor: `application/json; charset=utf-8`. Aplikacija šalje `X-Racunator-Api: 1`; panel ga vraća u svakom odgovoru.
 - Pogrešan ključ, nepostojeći slug i deaktiviran korisnik daju **isti** odgovor 401 (ne otkriva se da li korisnik postoji).
@@ -22,7 +28,7 @@ Panel prikazuje QR kod sa JSON sadržajem:
   `api_daily_limit`, `0` = bez limita). Broje se samo `accepted` računi (ne duplikati ni odbijeni). Vidi „Dnevni limit".
 - Tokom ažuriranja panela svi API pozivi vraćaju 503 sa `Retry-After: 120` — pokušati ponovo kasnije.
 
-## GET /u/{slug}/ping
+### GET /u/{slug}/ping
 Provera uparivanja odmah posle skeniranja QR koda.
 
 ```sh
@@ -34,7 +40,7 @@ Odgovor 200:
 ```
 `accountant` je naziv knjigovodstva iz podešavanja panela (`accountant_name`).
 
-## POST /u/{slug}/receipts
+### POST /u/{slug}/receipts
 Slanje do **200 računa** u jednom zahtevu; telo najviše **1 MB** (veće telo, ili `Content-Length` preko 1 MB, dobija 413
 pre nego što panel pročita telo).
 
@@ -46,7 +52,7 @@ curl -s https://domen.rs/panel/u/0f3c…/receipts \
        "sellerPib":"100000000","buyerPib":"101234567","invoiceType":"Normal","transactionType":"Sale"}]}'
 ```
 
-### Polja računa
+#### Polja računa
 | Polje | Obavezno | Pravilo |
 |---|---|---|
 | `invoiceNumber` | da | PFR broj, oblik `^[A-Z0-9]{8}-[A-Z0-9]{8}-\d{1,10}$` (npr. `RCVG4AFL-RCVG4AFL-234120`) |
@@ -67,11 +73,13 @@ iznos to su podaci koje traži zvanična stranica za proveru `https://suf.purs.g
 ili prazan tekst se čuva kao `null`; neispravna vrednost odbija račun razlogom koji počinje imenom polja (npr.
 `invoiceCounter: očekuje se brojač oblika N/N (npr. 123/456) ili null`).
 
-### Računi uneti po PFR broju (`source: "pfr"`)
+#### Računi uneti po PFR broju (`source: "pfr"`)
 Račun koji korisnik u aplikaciji unese po PFR broju (bez QR koda) nema link sa stavkama, pa aplikacija šalje
 `"source":"pfr"` i `"verificationUrl":"https://suf.purs.gov.rs/verify"` — zvaničnu stranicu na kojoj knjigovođa ukuca
-PFR broj. Bilo koja druga vrednost `verificationUrl` uz `pfr` (i link `…/v/?vl=…`) se odbija. Drugi `source` od `qr`/`pfr`
-se odbija razlogom `source: dozvoljeno je "qr" ili "pfr"`.
+PFR broj. Od verzije 1.0.3 aplikacija pravi link takvog računa najčešće preuzme sama, sa stranice rezultata provere
+(QR kod na kraju žurnala), i to pre slanja — tada račun stiže kao običan `qr`, a `pfr` stiže samo kad link nije pronađen.
+Bilo koja druga vrednost `verificationUrl` uz `pfr` (i link `…/v/?vl=…`) se odbija. Drugi `source` od `qr`/`pfr` se
+odbija razlogom `source: dozvoljeno je "qr" ili "pfr"`.
 ```json
 {"invoiceNumber":"RCVG4AFL-RCVG4AFL-234120","source":"pfr","verificationUrl":"https://suf.purs.gov.rs/verify",
  "sdcDateTime":"2026-10-24T21:42:31","totalAmountMinor":123456,"sellerName":"ZORA MARKET DOO","sellerPib":"100000000",
@@ -81,14 +89,15 @@ se odbija razlogom `source: dozvoljeno je "qr" ili "pfr"`.
 U panelu se uz takav račun prikazuje blok **Podaci za proveru** (PFR broj, brojač sa nastavkom, PFR vreme u obliku
 `24.10.2026. 21:42`, iznos `1.234,56`) sa dugmetom za kopiranje svakog podatka.
 
-**Nadogradnja zapisa (pfr → qr):** ako panel već ima račun tog korisnika sa istim `invoiceNumber` i `source = pfr`, a stigne
-isti račun sa `source = qr` (ili bez polja) i pravim linkom koji počinje sa `https://suf.purs.gov.rs/v/?vl=`, panel ažurira
+**Nadogradnja zapisa (pfr → qr):** kad aplikacija (od verzije 1.0.3) kasnije dobije pravi link računa koji je već poslala
+kao `pfr`, ponovo ga šalje sa `source = qr`. Ako panel već ima račun tog korisnika sa istim `invoiceNumber` i
+`source = pfr`, a stigne isti račun sa `source = qr` (ili bez polja) i pravim linkom koji počinje sa `https://suf.purs.gov.rs/v/?vl=`, panel ažurira
 postojeći zapis (`verificationUrl`, `source`, sirovi JSON i ostala polja iz nove stavke; vreme prijema ostaje prvobitno;
 `invoiceCounter` i `invoiceCounterExtension` se zamenjuju samo ako ih nova stavka ima, inače ostaju sačuvani) i
 vraća ga u `accepted`. Svi drugi ponovljeni računi (qr → qr, pfr → pfr, qr → pfr, pfr → qr bez linka `…/v/?vl=…`) idu u
 `duplicates` kao i ranije.
 
-### Odgovor 200
+#### Odgovor 200
 ```json
 {"accepted":["RCVG4AFL-RCVG4AFL-234120"],"duplicates":[],"rejected":[{"invoiceNumber":"…","reason":"sdcDateTime: očekuje se ISO 8601, npr. 2026-10-24T21:42:31"}]}
 ```
@@ -98,7 +107,7 @@ vraća ga u `accepted`. Svi drugi ponovljeni računi (qr → qr, pfr → pfr, qr
 - `rejected` — računi koji nisu prošli proveru, sa razlogom (`polje: opis`). `invoiceNumber` je `null` ako ga nije bilo.
   Ponovno slanje istog neispravnog računa neće uspeti.
 
-### Dnevni limit
+#### Dnevni limit
 Ako bi zahtev prešao dnevni limit, panel ga odbija **u celosti** (ništa se ne upisuje) sa 429 i poljem `remaining`:
 ```json
 {"error":"daily_limit","message":"Zahtev bi prešao dnevni limit od 2000 računa. Danas može još 37 — …","remaining":37}
@@ -108,7 +117,7 @@ Ako bi zahtev prešao dnevni limit, panel ga odbija **u celosti** (ništa se ne 
 `GET /ping` radi i kad je limit dostignut. Kad korisnik pređe pola limita i kad ga dostigne, panel to jednom dnevno
 upisuje u dnevnik radnji knjigovođe.
 
-## Greške
+### Greške
 Telo greške: `{"error":"<kod>","message":"<opis na srpskom>"}`.
 
 | Status | `error` | Kada | Šta aplikacija radi |

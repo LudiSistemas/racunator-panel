@@ -36,7 +36,7 @@ Baza treba da bude **prazna** (ili bar bez tabela panela). Ako hosting nema MySQ
    install fajl je otporan i na „tekstualni", ali binarni je pouzdaniji.)
 
 *Slika ekrana (opis): File Manager sa otvorenim folderom `public_html/panel/` u kome je samo jedan fajl,
-`racunator-panel-install.php`, veličine oko 250 KB.*
+`racunator-panel-install.php`, veličine oko 350 KB.*
 
 ### 3. Otvorite install fajl u pregledaču
 Idite na `https://vas-domen.rs/panel/racunator-panel-install.php`. Install fajl:

@@ -12,7 +12,8 @@ info:
     - **API za knjigovođu** (`/api/{slug}/v1/…`, samo čitanje): knjigovodstveni program čita korisnike i račune i izvozi
       mesec u CSV ili JSON. Uključuje se u panelu (Podešavanja → API za knjigovođu); ključ knjigovođe (šema
       `kljucKnjigovodje`). Isključen API, pogrešan slug i ključ daju isti 401; 120 zahteva u minutu; blokada adrese
-      posle 10 promašaja ključa u 15 minuta.
+      posle 10 promašaja ključa u 15 minuta. Samo `GET` — druga metoda daje 405 `method_not_allowed`, nepoznata
+      putanja 404 `not_found`.
 
     Opis na srpskom: docs/api.md.
   license:
@@ -344,8 +345,9 @@ paths:
         "200":
           description: >-
             CSV: UTF-8 sa BOM-om, razdvajač `;`, decimalni zarez, redovi CRLF, iste kolone kao „Preuzmi CSV" u panelu
-            (Datum; Prodavac; PIB prodavca; PIB kupca; Iznos; PFR broj; Vrsta računa; Vrsta transakcije; Link za proveru);
-            bez `clientId` dodaje se prva kolona „Korisnik". JSON: niz računa.
+            (Datum; Prodavac; PIB prodavca; PIB kupca; Iznos; PFR broj; Vrsta računa; Vrsta transakcije; Link za proveru;
+            Izvor — `QR` ili `PFR broj`; Brojač; Nastavak — prazno ako ih aplikacija nije poslala); bez `clientId` dodaje se
+            prva kolona „Korisnik". JSON: niz računa.
           content:
             text/csv:
               schema:

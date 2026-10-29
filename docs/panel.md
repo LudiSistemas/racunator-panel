@@ -1,7 +1,8 @@
 # Uputstvo za knjigovođu
 
 Ovo uputstvo opisuje svakodnevni rad u Računator panelu: prijavu, dodavanje korisnika i QR kod, pregled računa po mesecu,
-izvoz u CSV, naloge za zaposlene i dvofaktorsku prijavu. Instalacija je opisana u [instalacija.md](instalacija.md).
+izvoz u CSV, naloge za zaposlene, dvofaktorsku prijavu, API za knjigovođu i uslove korišćenja. Instalacija je opisana u
+[instalacija.md](instalacija.md).
 
 ## Pojmovi
 - **Korisnik** — firma ili preduzetnik čije račune primate. Korisnik ima aplikaciju **Računator** na telefonu.
@@ -63,8 +64,10 @@ ponovo da skenira.
    **Podaci za proveru** sa svim što ta stranica traži: PFR broj, brojač sa nastavkom (npr. `123/456 ПП`), PFR vreme u
    obliku forme (npr. `20.10.2026. 15:51`) i iznos (npr. `6.270,00`) — svaki podatak ima svoje dugme za kopiranje
    (**Kopiraj PFR broj**, **Kopiraj brojač**, **Kopiraj nastavak**, **Kopiraj vreme**, **Kopiraj iznos**). Ako aplikacija
-   nije poslala brojač (starija verzija), umesto njega piše „— (aplikacija nije poslala)". Ako korisnik kasnije skenira QR
-   kod istog računa, panel sam zameni zapis pravim linkom i oznaka nestaje.
+   nije poslala brojač (starija verzija), umesto njega piše „— (aplikacija nije poslala)". Kad aplikacija kasnije dobije
+   pravi link tog računa (od verzije 1.0.3 ga sama preuzme sa zvanične stranice provere), panel sam zameni zapis pravim
+   linkom i oznaka nestaje. Aplikacija od verzije 1.0.3 link najčešće pronađe još pre slanja, pa takav račun odmah stiže
+   kao običan račun iz QR koda.
 5. Ispod tabele je zbir iznosa za mesec (sabira sve primljene račune, uključujući refundacije).
 
 ## Izvoz u CSV
@@ -115,7 +118,14 @@ nalogu). API samo čita podatke; promašaji ključa i izvozi se vide u dnevniku 
 **Dnevnik** prikazuje poslednjih 200 radnji: prijave i odjave, dodavanje i izmene korisnika, nove ključeve, deaktivacije,
 izvoze, promene naloga, lozinki, 2FA (i reset 2FA), odjave sa svih uređaja, API-ja i ažuriranja — sa vremenom, nalogom i
 IP adresom. Upisuje se i kad korisnik u jednom danu pošalje više od pola dnevnog limita računa (2000) i kad ga dostigne
-(nalog „sistem") — neobično mnogo računa može da znači da je njegov QR kod/ključ dospeo u pogrešne ruke.
+(nalog „sistem") — neobično mnogo računa može da znači da je njegov QR kod/ključ dospeo u pogrešne ruke. Beleže se i
+prihvatanje uslova korišćenja, promašaji ključa i izvozi preko API-ja za knjigovođu.
+
+## Uslovi korišćenja
+Uslovi se prihvataju pri instalaciji (korak „Uslovi korišćenja" u čarobnjaku). Link **Uslovi korišćenja** je u podnožju
+panela (stranica `/uslovi`, sa verzijom i datumom prihvatanja). Kad nova verzija panela donese izmenjene uslove,
+administrator posle prijave prvo vidi tu stranicu i mora ponovo da ih prihvati; dok to ne uradi, ostali ekrani ga vraćaju
+na nju. Zaposleni nisu blokirani. Pun tekst: [uslovi-koriscenja.md](uslovi-koriscenja.md) i <https://sistema.sh/uslovi>.
 
 ## Ažuriranje
 Administrator u meniju **Ažuriranje** vidi da li postoji nova verzija i šta donosi. Ništa se ne menja bez vaše potvrde,
