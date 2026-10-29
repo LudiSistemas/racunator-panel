@@ -10,7 +10,10 @@ Ovaj dokument je za **knjigovođe** koji panel koriste i za **održavaoce** koji
 - **Nalozi** knjigovodstva: korisničko ime, heš lozinke, tajna za dvofaktorsku prijavu (šifrovana), uloga.
 - **Dnevnik radnji** (ko je šta uradio, kada i sa koje IP adrese).
 - **config.php**: lozinka baze i tajni ključ instalacije.
-- **Rezervne kopije** (`storage/backups/`): kopija svih fajlova (uključujući config.php) i cele baze.
+- **Rezervne kopije** (`backups/` u folderu za podatke): kopija svih fajlova (uključujući config.php) i cele baze.
+
+„Folder za podatke" je podrazumevano `storage/` u folderu panela; pri instalaciji može da se izabere folder **van web
+root-a** (npr. `/home/nalog/racunator-podaci`), i to je bezbednije. U nastavku `storage/` znači taj folder.
 
 Ko dođe do baze ili rezervne kopije, vidi sve račune vaših korisnika. Zato su rezervne kopije i pristup hostingu jednako
 važni kao lozinka za panel.
@@ -114,24 +117,43 @@ Svi nalozi vide sve korisnike — panel je zamišljen za jednu kancelariju. Svak
 
 ### Instalacija
 - Install fajl proverava sopstveni SHA-256 i SHA-256 svakog raspakovanog fajla i odbija fajlove sa sumnjivim imenima
-  (`..`, apsolutne putanje).
-- Čarobnjak prihvata samo pregledač koji je otvorio install fajl (jednokratni ključ u adresi). Kad instalacija završi,
-  install fajl se briše, a čarobnjak je **zaključan** dok postoji `config.php`.
-- `config.php` dobija prava 0600 i nasumičan tajni ključ instalacije.
+  (`..`, apsolutne putanje) i fajlove kojih nema u manifestu.
+- Install fajl izdaje **samo jedan** ključ za čarobnjak — pregledaču koji ga je prvi otvorio. Svako sledeće otvaranje
+  install fajla pre kraja instalacije dobija odgovor „Instalacija je već započeta" (409) i **ne** dobija ključ.
+- Čarobnjak bez tog ključa (drugi pregledač, istekla sesija, ručno otpremljeni fajlovi bez install fajla) traži **dokaz
+  vlasništva**: prikaže ime fajla `install/DOZVOLA-<nasumičan niz>.txt` koji treba napraviti preko FTP-a ili File
+  Manager-a; tek tada nastavlja (fajl se sam briše). Sa SSH pristupom isto daje `php install/cli.php dozvola`.
+  Bez pristupa fajlovima hostinga niko ne može da „preuzme" nedovršenu instalaciju.
+- Čarobnjak odbija svaki rad kad se pokrene iz kopije programa (raspakovan paket u `releases/` ili prethodna verzija u
+  `_old/`); ti folderi dobijaju i sopstvenu zabranu pristupa preko veba.
+- Provera hostinga u čarobnjaku upiše probne fajlove u `storage/` (kao baza, rezervna kopija i dnevnik) i pokuša da ih
+  preuzme preko javne adrese. Ako uspe, stavka je **crvena** i instalacija ne može dalje dok se ne izabere folder za
+  podatke van web root-a ili hosting ne počne da poštuje `.htaccess`.
+- Kad instalacija završi, install fajl se briše, a čarobnjak je **zaključan** dok postoji `config.php`.
+- `config.php` dobija prava 0600 i nasumičan tajni ključ instalacije (`app_key`).
 
 ### Ažuriranje
 - Ništa se ne preuzima ni ne menja bez potvrde administratora. Pre izmene se pravi rezervna kopija, a greška posle zamene
   fajlova vraća prethodnu verziju automatski (detalji u [azuriranje.md](azuriranje.md)).
 - Paket se preuzima isključivo sa zvanične stranice izdanja na GitHub-u i proverava na dva načina: **SHA-256** (da nije
   oštećen) i **digitalni potpis Ed25519** (da ga je zaista objavio održavalac). Paket sa neispravnim potpisom se odbija.
-- Potpis može da se proveri samo kad hosting ima PHP ekstenziju **sodium**. Bez nje panel proverava samo SHA-256 i upisuje
-  upozorenje u dnevnik radnji — zato tražite od hostinga ekstenziju sodium (stranica Ažuriranje pokazuje da li je provera
-  potpisa uključena).
+- Potpis može da se proveri samo kad hosting ima PHP ekstenziju **sodium**. **Bez nje se ažuriranje iz panela (preko
+  mreže) odbija** — ništa se ne preuzima ni ne menja. Ostaje ručno ažuriranje install fajlom
+  ([azuriranje.md](azuriranje.md)): panel pre potvrde prikaže SHA-256 install fajla, administrator ga uporedi sa
+  `SHA256SUMS` na zvaničnoj stranici izdanja i izričito potvrdi („Uporedio sam SHA-256"); to se upisuje u dnevnik radnji.
+  Bolje je zatražiti od hostinga ekstenziju sodium (deo standardnog PHP-a).
+- Install fajl za ručno ažuriranje nosi potpis paketa. Install fajl bez potpisa se uvek odbija, a gde sodium postoji,
+  odbija se i install fajl sa neispravnim ili tuđim potpisom. Paket koji čeka potvrdu (`releases/`, `storage/tmp/manual-update*`) nije dostupan preko veba, a dugme
+  „Odbaci paket" u `install/` ga briše.
+- Paket se proverava i raspakuje iz istih bajtova (iz privatnog privremenog fajla), pa ne može da se podmetne između
+  provere i raspakivanja. Fajl kojeg nema u manifestu paketa se odbija.
 
 ## Šta zavisi od vas i hostinga
 
-Panel radi na zajedničkom (shared) hostingu i deo zaštite zavisi od podešavanja servera. Podaci (`storage/`) i `config.php`
-nalaze se u folderu panela, a od pristupa preko veba ih štite `.htaccess` pravila. Zato su sledeće stavke važne.
+Panel radi na zajedničkom (shared) hostingu i deo zaštite zavisi od podešavanja servera. `config.php` je u folderu panela,
+a od pristupa preko veba ga štite `.htaccess` pravila (i to što je PHP fajl). Folder za podatke je takođe u folderu panela,
+osim ako pri instalaciji niste izabrali folder van web root-a — preporučujemo to kad hosting dozvoljava. Zato su sledeće
+stavke važne.
 
 ### Obavezno
 1. **HTTPS.** Uključite besplatan SSL sertifikat (Let's Encrypt) i javnu adresu panela držite na `https://`. Bez HTTPS-a
@@ -151,11 +173,13 @@ nalaze se u folderu panela, a od pristupa preko veba ih štite `.htaccess` pravi
 3. **Proverite da poverljivi fajlovi nisu dostupni.** Posle instalacije u pregledaču otvorite (zamenite domen):
    - `https://vas-domen.rs/panel/config.php` — sme da bude samo prazna stranica, „Forbidden" ili „nije pronađena"; **nikad**
      tekst koji počinje sa `<?php`,
-   - `https://vas-domen.rs/panel/storage/` i `https://vas-domen.rs/panel/storage/panel.sqlite` — mora biti „Forbidden" (403),
+   - `https://vas-domen.rs/panel/storage/` i `https://vas-domen.rs/panel/storage/panel.sqlite` — mora biti „Forbidden" (403)
+     (ako je folder za podatke van web root-a, ove adrese daju „nije pronađena"),
+   - `https://vas-domen.rs/panel/releases/` i `https://vas-domen.rs/panel/_old/` (ako postoje) — „Forbidden" ili „nije pronađena",
    - `https://vas-domen.rs/panel/src/version.php` — mora biti „Stranica nije pronađena".
 
-   Ako bilo šta od ovoga preuzme fajl ili prikaže sadržaj, odmah isključite panel (preimenujte folder) i javite se podršci
-   hostinga.
+   Čarobnjak ovo za `storage/` proverava sam pri instalaciji, ali hosting može kasnije da promeni podešavanja. Ako bilo šta
+   od ovoga preuzme fajl ili prikaže sadržaj, odmah isključite panel (preimenujte folder) i javite se podršci hostinga.
 4. **Podržana verzija PHP-a.** Panel radi od PHP 8.1, ali PHP 8.1 više ne dobija bezbednosne ispravke. Koristite **PHP 8.3
    ili noviji** (cPanel → „Select PHP Version" / „MultiPHP Manager").
 5. **PHP radi pod vašim korisnikom** (PHP-FPM ili suPHP — standard na većini hostinga). Tada drugi nalozi na istom serveru
@@ -177,17 +201,20 @@ Dve opcione stavke u `config.php` (fajl je vaš; ažuriranje ga ne menja):
 
 ### Preporučeno
 - Prava fajlova: folderi 755, fajlovi 644, `config.php` 600, `storage/` 700. **Nikad 777.**
-- PHP ekstenzija **sodium** (provera potpisa pri ažuriranju), `display_errors = Off` na produkciji.
+- PHP ekstenzija **sodium** (bez nje nema ažuriranja iz panela, samo ručnog), `display_errors = Off` na produkciji.
 - Ako hosting dozvoljava, `open_basedir` ograničen na vaš nalog.
 - Install fajl i nedovršeno ažuriranje **ne ostavljajte na serveru**:
-  - instalaciju završite odmah posle otpremanja install fajla (dok nije završena, ko otvori install fajl može da je preuzme),
+  - instalaciju završite odmah posle otpremanja install fajla i u istom pregledaču (drugi pregledač traži dokaz
+    vlasništva fajlom `install/DOZVOLA-….txt`),
   - posle ručnog ažuriranja proverite da u folderu panela nema `racunator-panel-install.php`; ako ste install fajl nove
-    verzije otpremili, a ažuriranje ne želite da potvrdite, obrišite folder `releases/` preko FTP-a.
+    verzije otpremili, a ažuriranje ne želite da potvrdite, u `install/` kliknite „Odbaci paket" (ili preko FTP-a obrišite
+    `releases/` i `storage/tmp/manual-update*`).
 - Dok panel nije potpuno instaliran, ne objavljujte njegovu adresu.
 
 ### Rezervne kopije
-- Panel pre svakog ažuriranja sam pravi kopiju u `storage/backups/` i čuva poslednje tri. To **nije** zamena za redovnu
-  kopiju: ako hosting izgubi disk, nestaju i one.
+- Panel pre svakog ažuriranja sam pravi kopiju u `storage/backups/` i čuva poslednje tri. Ime svake kopije ima nasumičan
+  dodatak (npr. `20261029-120000-1-<16 znakova>`), pa adresa kopije ne može da se pogodi po vremenu ažuriranja; folder
+  kopije ima prava 0700. To **nije** zamena za redovnu kopiju: ako hosting izgubi disk, nestaju i one.
 - Pravite i **sopstvene redovne kopije van hostinga** (npr. jednom nedeljno): kopija foldera panela (sa `storage/`) i
   izvoz baze iz phpMyAdmin-a. Mnogi hostinzi nude automatske dnevne kopije — uključite ih.
 - Kopije sadrže sve račune, heševe lozinki, tajne za 2FA (šifrovane, ali je ključ — `config.php` — u istoj kopiji) i
@@ -205,8 +232,9 @@ Dve opcione stavke u `config.php` (fajl je vaš; ažuriranje ga ne menja):
 - **Zaposleni (ili drugi administrator) je izgubio telefon:** administrator u **Nalozi** klikne **Resetuj 2FA** kod tog
   naloga. Dvofaktorska prijava se isključuje, sve sesije tog naloga se odjavljuju, a radnja se beleži u dnevnik. Zaposleni
   se prijavi lozinkom i odmah ponovo uključi 2FA. (Nova lozinka sama po sebi **ne** isključuje 2FA.)
-- **Jedini administrator je izgubio telefon:** panel tada ne može da pomogne (sopstvena 2FA se isključuje samo uz kod) —
-  to se radi u bazi:
+- **Jedini administrator je izgubio telefon:** **Resetuj 2FA** ne radi za sopstveni nalog, a sopstvena 2FA se isključuje
+  samo uz kod. Najjednostavnije je da imate **dva administratorska naloga** (npr. rezervni, sa lozinkom u sefu) — tada drugi
+  administrator klikne **Resetuj 2FA**. Ako drugog administratora nema, to se radi u bazi:
   - MySQL/MariaDB: phpMyAdmin → baza panela → kartica SQL:
     ```sql
     UPDATE users SET totp_secret = NULL WHERE username = 'korisnicko-ime';
@@ -215,8 +243,9 @@ Dve opcione stavke u `config.php` (fajl je vaš; ažuriranje ga ne menja):
     `sqlite3 storage/panel.sqlite "UPDATE users SET totp_secret = NULL WHERE username = 'korisnicko-ime';"`,
     ili zatražite od podrške hostinga da to uradi.
 
-  Ova izmena se ne upisuje u dnevnik radnji — zabeležite je sami. Odmah posle prijave ponovo uključite 2FA. Ako imate
-  drugog administratora, bolje je da on klikne **Resetuj 2FA** (beleži se u dnevnik).
+  (Tajna u bazi je šifrovana, ali `NULL` jednostavno isključuje 2FA; isti postupak važi i ako je `app_key` izgubljen.)
+  Ova izmena se ne upisuje u dnevnik radnji i ne odjavljuje druge sesije tog naloga — zabeležite je sami i posle prijave
+  kliknite **Odjavi me sa svih uređaja**, pa odmah ponovo uključite 2FA.
 
 ## Ako sumnjate na provalu
 1. Promenite lozinku sopstvenog naloga i administratorskih naloga; svim zaposlenima postavite nove lozinke.
@@ -224,7 +253,8 @@ Dve opcione stavke u `config.php` (fajl je vaš; ažuriranje ga ne menja):
    novi nalozi, izvozi, preuzimanja rezervnih kopija).
 3. Promena lozinke (i nova lozinka koju postavi administrator) odjavljuje sve ostale sesije tog naloga, pa je napadač
    prijavljen tim nalogom odmah odjavljen. Bez promene lozinke isto radi **Podešavanja → Odjavi me sa svih uređaja**.
-   Za potpuno čišćenje (svi nalozi odjednom) možete i da obrišete sadržaj foldera `storage/tmp/sessions/` preko FTP-a.
+   Za potpuno čišćenje (svi nalozi odjednom) možete i da obrišete sadržaj foldera `tmp/sessions/` u folderu za podatke
+   preko FTP-a.
 4. Za korisnike za koje sumnjate da im je ključ otkriven, kliknite **Nov ključ** i dajte im novi QR kod.
 5. Ako je neko mogao da vidi fajlove na hostingu: promenite lozinku baze (cPanel → MySQL Databases) i upišite novu u
    `config.php`, promenite lozinke za hosting i FTP.
@@ -232,11 +262,15 @@ Dve opcione stavke u `config.php` (fajl je vaš; ažuriranje ga ne menja):
 
 ## Za održavaoce
 - **Ključ za potpis izdanja** je najvažnija tajna projekta: ko ga ima, može da objavi „ažuriranje" koje sve instalacije
-  prihvataju. Postupak je u [izdavanje.md](izdavanje.md). Javni ključ u `src/Services/ReleaseChecker.php` mora biti
-  postavljen pre prvog javnog izdanja; privatni ključ je samo u GitHub secret-u `RELEASE_SIGNING_KEY` i u menadžeru lozinki.
-- Zaštitite GitHub nalog i repo: 2FA za sve sa pravom pisanja, zaštićeni `main` i tagovi `v*`, pregled pre spajanja.
-  Preporuka je da se secret za potpis drži u GitHub *environment*-u sa obaveznim odobrenjem i da su akcije u workflow-ima
-  pinovane na tačan commit (SHA), a ne na oznaku (`@v2`).
+  prihvataju. Postupak je u [izdavanje.md](izdavanje.md). Javni ključ je u `src/Services/ReleaseChecker.php`; privatni
+  ključ je samo u secret-u `RELEASE_SIGNING_KEY` u GitHub **environment-u `release`** (sa obaveznim odobrenjem
+  održavaoca) i u menadžeru lozinki.
+- Workflow izdanja (`.github/workflows/release.yml`) je podeljen na izolovane poslove: testovi i build rade bez tajni i
+  bez prava pisanja; potpisivanje je zaseban posao koji jedini vidi ključ, čeka odobrenje u environment-u `release` i ne
+  pokreće Composer ni zavisnosti; tek poslednji posao ima pravo da napravi GitHub Release. Sve akcije su pinovane na tačan
+  commit (SHA). Pri izmeni workflow-a zadržite ta pravila.
+- Zaštitite GitHub nalog i repo: 2FA za sve sa pravom pisanja, zaštićeni `main` i tagovi `v*`, pregled pre spajanja, a
+  među odobravaocima environment-a `release` samo održavaoci.
 - U kodu: sav izlaz u šablonima ide kroz `e()`, SQL samo kroz prepared statements, nasumične vrednosti samo iz
   `random_bytes()`, ključevi i lozinke nikad u log ni u dnevnik radnji (vidi [razvoj.md](razvoj.md)).
 - JavaScript biblioteka za QR kod (`public/assets/qrcode.min.js`, qrcode-generator 1.4.4) je lokalna i pinovana; poreklo i

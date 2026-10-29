@@ -92,7 +92,7 @@ Install fajl koji ste otpremili, a ne želite da instalirate, ne ostavljajte na 
 ## Ručni povratak (kad ni panel ni install/ ne rade)
 1. Preko FTP-a obrišite (ili preimenujte) `public/`, `src/`, `install/`, `docs/` i premestite iste direktorijume iz `_old/`
    u koren panela.
-2. Ako treba vratiti i bazu: u `storage/backups/<datum>/` je `baza.sql` (uvezite ga u phpMyAdmin → „Import") ili
+2. Ako treba vratiti i bazu: u `<folder za podatke>/backups/<datum-vreme-n-slučajno>/` je `baza.sql` (uvezite ga u phpMyAdmin → „Import") ili
    `baza.sqlite` (kopirajte ga preko `storage/panel.sqlite`).
 3. Obrišite `storage/maintenance.flag` ako postoji.
 
