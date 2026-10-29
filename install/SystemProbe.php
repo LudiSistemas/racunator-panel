@@ -62,6 +62,43 @@ class SystemProbe
     }
 
     /**
+     * Upiše probne fajlove (nasumičan sadržaj) u $dir i zatraži ih preko $baseUrl. Vraća listu fajlova koji su dostupni
+     * (status 200 sa istim sadržajem), praznu listu kad nijedan nije, ili null kad poziv samom sebi nije moguć.
+     * @param list<string> $names relativne putanje u $dir
+     * @return list<string>|null
+     */
+    public function webExposed(string $dir, string $baseUrl, array $names): ?array
+    {
+        $client = new \RacunatorPanel\Services\NativeHttpClient(8, 4096);
+        $exposed = [];
+        $answered = false;
+        $written = [];
+        try {
+            foreach ($names as $name) {
+                $file = $dir . '/' . $name;
+                if (!is_dir(dirname($file)) || @file_put_contents($file, $token = bin2hex(random_bytes(12))) === false) {
+                    continue;
+                }
+                $written[] = $file;
+                try {
+                    $res = $client->get(rtrim($baseUrl, '/') . '/' . $name, ['User-Agent' => 'racunator-panel-instaler']);
+                } catch (\Throwable) {
+                    continue;
+                }
+                $answered = true;
+                if ($res['status'] === 200 && trim($res['body']) === $token) {
+                    $exposed[] = basename($name);
+                }
+            }
+        } finally {
+            foreach ($written as $f) {
+                @unlink($f);
+            }
+        }
+        return $answered ? $exposed : null;
+    }
+
+    /**
      * Test mod_rewrite-a: upiše probni direktorijum sa .htaccess pravilom i proba ga preko HTTP-a na sopstvenoj adresi.
      * Vraća true (radi), false (server odgovara, ali pravilo ne radi) ili null (test nije moguć: nema odlaznih poziva,
      * nema adrese, hosting blokira poziv samom sebi).

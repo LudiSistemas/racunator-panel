@@ -37,7 +37,7 @@ $kindLabel = ['azuriranje' => 'Ažuriranje', 'rucno' => 'Ručno ažuriranje', 'p
   <dl class="kv">
     <dt>Verzija</dt><dd><strong><?= e($current) ?></strong></dd>
     <dt>Poslednja provera</dt><dd><?= $checkedAt !== null ? e(gmdate('d.m.Y. H:i', $checkedAt) . ' UTC') : 'još nije provereno' ?></dd>
-    <dt>Provera potpisa paketa</dt><dd><?= $signatureCheck ? 'uključena (Ed25519)' : 'nije moguća na ovom hostingu — proverava se samo SHA-256' ?></dd>
+    <dt>Provera potpisa paketa</dt><dd><?= $signatureCheck ? 'uključena (Ed25519)' : 'nije moguća na ovom hostingu (nema PHP ekstenzije sodium) — ažuriranje iz panela je isključeno, ostaje ručno ažuriranje' ?></dd>
   </dl>
   <?php if ($checkError !== null): ?>
     <p class="alert alert-error">Provera nove verzije nije uspela: <?= e($checkError) ?></p>
@@ -133,5 +133,5 @@ $kindLabel = ['azuriranje' => 'Ažuriranje', 'rucno' => 'Ručno ažuriranje', 'p
   <h2>Ručno ažuriranje</h2>
   <p>Ako hosting ne dozvoljava preuzimanje iz panela: preuzmite <code>racunator-panel-install.php</code> sa stranice izdanja na GitHub-u,
     otpremite ga preko FTP-a ili File Manager-a u folder panela (pored config.php) i otvorite ga u pregledaču. Install fajl prepoznaje
-    postojeću instalaciju i radi isto ažuriranje (sa rezervnom kopijom), posle prijave administratora.</p>
+    postojeću instalaciju i radi isto ažuriranje (sa rezervnom kopijom i proverom digitalnog potpisa), posle prijave administratora.</p>
 </section>

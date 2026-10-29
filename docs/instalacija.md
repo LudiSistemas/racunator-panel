@@ -9,7 +9,7 @@ SSH, Composer ni poznavanje programiranja: dovoljni su FTP (ili File Manager u k
 |---|---|---|
 | PHP | 8.1 | cPanel → „Select PHP Version" / „MultiPHP Manager" |
 | PHP ekstenzije | pdo + pdo_mysql (ili pdo_sqlite), openssl, mbstring, json, session | isto mesto → „Extensions" |
-| Za ažuriranje iz panela | zip, curl (ili `allow_url_fopen`), po mogućstvu sodium | isto |
+| Za ažuriranje iz panela | zip, sodium (provera potpisa), curl (ili `allow_url_fopen`) | isto |
 | Baza | MySQL/MariaDB (preporučeno) ili SQLite | cPanel → „MySQL Databases" |
 | Web server | Apache sa `mod_rewrite` i `AllowOverride All` (standard na shared hostingu) | podrška hostinga |
 | Memorija | `memory_limit` ≥ 64 MB | „Select PHP Version → Options" |
@@ -43,7 +43,15 @@ Idite na `https://vas-domen.rs/panel/racunator-panel-install.php`. Install fajl:
 - proveri verziju PHP-a (ako je prestara, kaže vam to umesto prazne stranice),
 - proveri da fajl nije oštećen pri prenosu (SHA-256),
 - raspakuje panel pored sebe i proveri svaki fajl,
-- preusmeri vas na čarobnjak `…/panel/install/`.
+- preusmeri vas na čarobnjak `…/panel/install/` sa jednokratnim ključem u adresi.
+
+Ključ dobija samo **prvi** ko otvori install fajl; ako ga ponovo otvorite, kaže „Instalacija je već započeta". Zato
+instalaciju završite odmah posle otpremanja. Ako ste zatvorili pregledač (ili je neko drugi bio brži), otvorite
+`…/panel/install/`: čarobnjak prikaže ime fajla (npr. `DOZVOLA-3f9a…txt`) koji treba da napravite preko FTP-a ili File
+Manager-a u folderu `install/`. Kad kliknete „Proverio sam", fajl se briše, vaš pregledač dobija nov ključ, a stari prestaje
+da važi — tako instalaciju može da nastavi samo neko ko ima pristup fajlovima hostinga. Isto važi i ako ste fajlove panela
+otpremili ručno (bez install fajla). Sa SSH-om: `php install/cli.php dozvola --url=https://vas-domen.rs/panel` ispisuje
+adresu čarobnjaka sa novim ključem.
 
 Ako folder nije prazan, install fajl odbija da radi i pokaže šta je u folderu — napravite novi folder.
 Postojeći `.htaccess` (ako ga je hosting stavio) se preimenuje u `.htaccess.pre-racunator-<datum>`.
@@ -57,13 +65,23 @@ kratko objašnjenje i, kod žutih i crvenih, rečenica „Šta tražiti od hosti
   bez HTTPS-a aplikacija Računator neće slati račune).
 - Test `mod_rewrite`-a upiše probni `.htaccess` i proba ga preko sopstvene adrese. Ako hosting ne dozvoljava da server
   pozove sam sebe, stavka je žuta i proverava se ponovo na kraju preko `/health`.
+- **Zaštita storage/**: čarobnjak upiše probne fajlove u `storage/` (kao baza, rezervna kopija i dnevnik) i pokuša da ih
+  preuzme preko javne adrese. Ako uspe, stavka je **crvena**: server ne poštuje `.htaccess`, pa bi baza i kopije bile javne.
+- **Folder za podatke**: ispod provera možete upisati apsolutnu putanju foldera **van web root-a** (npr.
+  `/home/nalog/racunator-podaci`, iznad `public_html`) — tu idu baza (SQLite), rezervne kopije, dnevnici i sesije, a putanja
+  se upisuje u `config.php` (`storage`). To je bezbednije od podrazumevanog `storage/` u folderu panela i rešava crvenu
+  stavku „Zaštita storage/". Folder unutar web root-a čarobnjak ne prihvata.
 
 ### 5. Čarobnjak: baza
 Izaberite **MySQL / MariaDB** i upišite server (`localhost`), port (`3306`), ime baze, korisnika i lozinku, pa
 kliknite **Testiraj vezu**. Poruka je na srpskom i kaže šta nije u redu (pogrešna lozinka, baza ne postoji, korisnik
 nema prava…). Lozinka se nikad ne prikazuje ponovo; ako polje ostavite prazno, zadržava se ranije uneta.
 
-Ili izaberite **SQLite** — baza je fajl `storage/panel.sqlite`, ništa ne treba podešavati.
+Ili izaberite **SQLite** — baza je fajl `panel.sqlite` u folderu za podatke (`storage/` ili folder koji ste izabrali), ništa
+ne treba podešavati.
+
+Lozinka baze se do kraja instalacije čuva u sesiji čarobnjaka samo šifrovana (ključ je u kolačiću vašeg pregledača), a briše
+se čim se upiše `config.php`.
 
 ### 6. Čarobnjak: javna adresa
 Predlog je adresa iz pregledača, npr. `https://vas-domen.rs/panel`. To je adresa na koju aplikacija Računator šalje
@@ -73,8 +91,9 @@ račune — mora početi sa **https://**. Promenite je samo ako panel otvarate p
 - **Naziv knjigovodstva** — vide ga vaši klijenti u aplikaciji posle skeniranja QR koda.
 - **Korisničko ime** i **lozinka** administratora (najmanje 12 znakova; merač pokazuje jačinu; savet: fraza od nekoliko reči).
 
-Klik na **Instaliraj**: panel upisuje `config.php` (prava 0600, sa nasumičnim tajnim ključem instalacije), pravi
-`storage/` (zaštićen od pristupa preko veba), pravi tabele u bazi, nalog administratora i zaključava instaler.
+Klik na **Instaliraj**: panel upisuje `config.php` (prava 0600 od prvog trenutka, sa nasumičnim tajnim ključem instalacije),
+pravi folder za podatke (`storage/` zaštićen od pristupa preko veba, ili izabrani folder van web root-a), pravi tabele u bazi,
+nalog administratora i zaključava instaler.
 
 ### 8. Kraj
 *Slika ekrana (opis): zelena poruka „Panel je instaliran", ispod nje „Panel odgovara na …/health", i dugme „Otvori prijavu".*
@@ -91,7 +110,8 @@ public_html/panel/
   src/             kod panela (nedostupan preko veba)
   install/         čarobnjak (zaključan) i ažuriranje
   docs/            uputstva
-  storage/         SQLite baza, rezervne kopije, dnevnici, sesije (nedostupno preko veba)
+  storage/         SQLite baza, rezervne kopije, dnevnici, sesije (nedostupno preko veba; ili folder van web root-a)
+  releases/, _old/ samo tokom/posle ažuriranja: novi paket i prethodna verzija (nedostupno preko veba)
 ```
 
 ## Tipični problemi na hostingu
@@ -130,7 +150,8 @@ zadržite podatke, vratite `config.php` iz rezervne kopije umesto ponovne instal
   RACUNATOR_ADMIN_PASSWORD='…' RACUNATOR_DB_PASS='…' php install/cli.php instaliraj --db=mysql --db-host=localhost \
       --db-name=panel --db-user=panel --url=https://vas-domen.rs/panel --admin=marko --naziv="Knjigovodstvo XY"
   ```
-  (`--db=sqlite` za SQLite; `php install/cli.php provera` samo pokreće provere.)
+  (`--db=sqlite` za SQLite; `--storage=/home/nalog/racunator-podaci` za folder za podatke van web root-a;
+  `php install/cli.php provera` samo pokreće provere.)
 - **Document root = `public/`** (VPS, sopstveni virtual host): koreni `.htaccess` tada nije potreban, a čarobnjak `install/` nije
   dostupan preko veba — instalirajte preko `install/cli.php` (gore). Ručno ažuriranje u tom slučaju: `php install/cli.php azuriraj`.
 - **nginx**: sve zahteve prosledite na `public/index.php` (`try_files $uri /index.php?$query_string;` sa root-om na `public/`),

@@ -20,17 +20,22 @@ final class Checks
 
     private readonly SystemProbe $probe;
 
+    private readonly string $storage;
+
     /**
      * @param string $root koren instalacije
-     * @param ?string $installUrl adresa direktorijuma install/ (za test mod_rewrite-a), null u CLI režimu
+     * @param ?string $installUrl adresa direktorijuma install/ (za test mod_rewrite-a i zaštite storage/), null u CLI režimu
+     * @param ?string $storage folder za podatke (podrazumevano storage/ u korenu; može biti van web root-a)
      */
     public function __construct(
         private readonly string $root,
         private readonly ?string $installUrl = null,
         private readonly bool $https = false,
         ?SystemProbe $probe = null,
+        ?string $storage = null,
     ) {
         $this->probe = $probe ?? new SystemProbe();
+        $this->storage = rtrim($storage ?? $root . '/storage', '/');
     }
 
     /** @return list<array{key:string,label:string,status:string,message:string,hint:string}> */
@@ -77,8 +82,9 @@ final class Checks
 
         $r[] = $p->extensionLoaded('sodium')
             ? $this->item('ext_sodium', 'Ekstenzija sodium', self::OK, 'Uključena (provera digitalnog potpisa paketa pri ažuriranju).')
-            : $this->item('ext_sodium', 'Ekstenzija sodium', self::WARN, 'Nije uključena. Pri ažuriranju se proverava samo SHA-256, bez digitalnog potpisa.',
-                'Zatražite od hostinga PHP ekstenziju „sodium".');
+            : $this->item('ext_sodium', 'Ekstenzija sodium', self::WARN, 'Nije uključena. Bez nje panel ne može da proveri digitalni potpis paketa, pa je '
+                . 'ažuriranje iz panela (preko mreže) isključeno; ostaje ručno ažuriranje install fajlom uz ručnu proveru SHA-256.',
+                'Zatražite od hostinga PHP ekstenziju „sodium" (standardni deo PHP-a od verzije 7.2).');
 
         $curl = $p->extensionLoaded('curl') && $p->functionUsable('curl_exec');
         $fopen = filter_var($p->ini('allow_url_fopen'), FILTER_VALIDATE_BOOLEAN);
@@ -99,7 +105,7 @@ final class Checks
             : $this->item('write_root', 'Pisanje u folder instalacije', self::FAIL, 'PHP ne može da piše u ' . $this->root . '.',
                 'Postavite prava foldera na 755 (vlasnik je vaš nalog) ili zatražite od hostinga da PHP radi pod vašim korisnikom (PHP-FPM/suPHP).');
 
-        $storage = $this->root . '/storage';
+        $storage = $this->storage;
         $storageOk = is_dir($storage) ? ($p->isWritable($storage) && $p->canCreateFile($storage)) : $rootOk;
         $r[] = $storageOk
             ? $this->item('write_storage', 'Pisanje u storage/', self::OK, 'Folder za bazu, kopije i dnevnike je upisiv.')
@@ -133,6 +139,8 @@ final class Checks
                 'Ako posle instalacije panel daje grešku 404 ili 500, zatražite od hostinga mod_rewrite i AllowOverride All.');
         }
 
+        $r[] = $this->storageExposure();
+
         $basedir = $p->ini('open_basedir');
         if ($basedir !== '') {
             $r[] = $this->item('open_basedir', 'open_basedir', self::OK, 'Uključeno (' . $basedir . '). Panel koristi samo svoj folder, pa ovo ne smeta.',
@@ -140,6 +148,39 @@ final class Checks
         }
 
         return $r;
+    }
+
+    /**
+     * Da li su poverljivi fajlovi u storage/ dostupni preko veba: upiše probne fajlove (.txt, .zip, .sql — kao baza,
+     * rezervne kopije i dnevnici) i zatraži ih preko javne adrese. Bilo koji odgovor 200 sa probnim sadržajem = crveno.
+     * @return array{key:string,label:string,status:string,message:string,hint:string}
+     */
+    private function storageExposure(): array
+    {
+        $label = 'Zaštita storage/ (baza, rezervne kopije)';
+        $rootReal = rtrim(str_replace('\\', '/', (string) (realpath($this->root) ?: $this->root)), '/');
+        $storReal = rtrim(str_replace('\\', '/', (string) (realpath($this->storage) ?: $this->storage)), '/');
+        if ($storReal !== $rootReal . '/storage' && !str_starts_with($storReal . '/', $rootReal . '/')) {
+            return $this->item('storage_web', $label, self::OK, 'Folder za podatke je van foldera panela (' . $this->storage . ').');
+        }
+        if ($this->installUrl === null || $this->installUrl === '') {
+            return $this->item('storage_web', $label, self::WARN, 'Nije provereno (nema javne adrese).',
+                'Posle instalacije otvorite …/storage/ u pregledaču — mora biti „Forbidden" (403).');
+        }
+        $base = preg_replace('#/install/?$#', '', rtrim($this->installUrl, '/')) . substr($storReal, strlen($rootReal));
+        $exposed = $this->probe->webExposed($this->storage, $base, ['proba-' . bin2hex(random_bytes(6)) . '.txt',
+            'backups/proba-' . bin2hex(random_bytes(6)) . '.zip', 'logs/proba-' . bin2hex(random_bytes(6)) . '.sql']);
+        if ($exposed === null) {
+            return $this->item('storage_web', $label, self::WARN, 'Test nije bio moguć (server ne može da pozove sam sebe).',
+                'Posle instalacije otvorite …/storage/panel.sqlite i …/storage/ u pregledaču — mora biti „Forbidden" (403).');
+        }
+        if ($exposed !== []) {
+            return $this->item('storage_web', $label, self::FAIL, 'Fajlovi iz storage/ su dostupni preko veba (' . implode(', ', $exposed)
+                . '): server ne poštuje .htaccess zabranu. Baza, rezervne kopije i dnevnici bili bi javni.',
+                'Izaberite „Folder za podatke" van web root-a (ispod), ili zatražite od hostinga AllowOverride All (Apache); na nginx-u '
+                . 'zabranite pristup svemu van public/ (docs/instalacija.md).');
+        }
+        return $this->item('storage_web', $label, self::OK, 'Probni fajlovi u storage/ nisu dostupni preko veba.');
     }
 
     /** Najgori status u listi. */

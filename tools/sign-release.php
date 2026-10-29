@@ -6,7 +6,8 @@ declare(strict_types=1);
  * ili 32 bajta seed-a, kako ga ispisuje tools/generate-signing-key.php). Za svaki fajl pravi <fajl>.sig (base64 potpisa).
  *   RELEASE_SIGNING_KEY=… php tools/sign-release.php build/racunator-panel-1.2.3.zip [još fajlova…]
  * Bez argumenata potpisuje build/racunator-panel-<verzija>.zip. Posle potpisa proverava ga javnim ključem iz
- * src/Services/ReleaseChecker.php (ako je postavljen) — izdanje sa ključem koji panel ne prepoznaje se ne objavljuje.
+ * src/Services/ReleaseChecker.php — izdanje sa ključem koji panel ne prepoznaje se ne objavljuje.
+ * Ne zahteva Composer ni ext-zip (radi i u čistoj slici php:8.3-cli u koraku potpisa workflow-a izdanja).
  */
 
 require __DIR__ . '/lib/Package.php';
@@ -19,43 +20,41 @@ if (!function_exists('sodium_crypto_sign_detached')) {
     fwrite(STDERR, "GREŠKA: potrebna je PHP ekstenzija sodium.\n");
     exit(1);
 }
-$raw = base64_decode((string) getenv('RELEASE_SIGNING_KEY'), true);
-if ($raw === false || $raw === '') {
+if ((string) getenv('RELEASE_SIGNING_KEY') === '') {
     fwrite(STDERR, "GREŠKA: env RELEASE_SIGNING_KEY nije postavljen (base64 privatnog ključa).\n");
     exit(1);
 }
-if (strlen($raw) === SODIUM_CRYPTO_SIGN_SEEDBYTES) {
-    $raw = sodium_crypto_sign_secretkey(sodium_crypto_sign_seed_keypair($raw));
-}
-if (strlen($raw) !== SODIUM_CRYPTO_SIGN_SECRETKEYBYTES) {
-    fwrite(STDERR, "GREŠKA: RELEASE_SIGNING_KEY nije Ed25519 ključ (očekuje se 32 ili 64 bajta posle base64).\n");
+try {
+    $secret = Package::secretKey((string) getenv('RELEASE_SIGNING_KEY'));
+} catch (\Throwable $e) {
+    fwrite(STDERR, 'GREŠKA: RELEASE_SIGNING_KEY: ' . $e->getMessage() . "\n");
     exit(1);
 }
-$public = base64_encode(sodium_crypto_sign_publickey_from_secretkey($raw));
+$public = base64_encode(sodium_crypto_sign_publickey_from_secretkey($secret));
 $files = array_slice($argv, 1);
 $root = dirname(__DIR__);
 if ($files === []) {
     $files = [$root . '/build/racunator-panel-' . Package::version($root) . '.zip'];
 }
-$strict = ReleaseChecker::publicKeyConfigured();
-if (!$strict) {
-    fwrite(STDERR, "UPOZORENJE: javni ključ u src/Services/ReleaseChecker.php nije postavljen — panel neće proveravati potpis.\n");
-} elseif (!hash_equals(ReleaseChecker::PUBLIC_KEY, $public)) {
+if (!ReleaseChecker::publicKeyConfigured()) {
+    fwrite(STDERR, "GREŠKA: javni ključ u src/Services/ReleaseChecker.php nije postavljen — panel ne bi mogao da proveri potpis.\n");
+    exit(1);
+}
+if (!hash_equals(ReleaseChecker::PUBLIC_KEY, $public)) {
     fwrite(STDERR, "GREŠKA: RELEASE_SIGNING_KEY ne odgovara javnom ključu u src/Services/ReleaseChecker.php.\n");
     exit(1);
 }
-foreach ($files as $f) {
-    $data = @file_get_contents($f);
-    if ($data === false) {
-        fwrite(STDERR, "GREŠKA: ne mogu da pročitam $f\n");
-        exit(1);
+try {
+    foreach ($files as $f) {
+        $sig = Package::signFile($f, $secret);
+        if (ReleaseChecker::verifySignature((string) file_get_contents($f), $sig, $public) !== true) {
+            throw new \RuntimeException('provera potpisa nije prošla za ' . $f);
+        }
+        echo "Potpisano: $f.sig\n";
     }
-    $sig = base64_encode(sodium_crypto_sign_detached($data, $raw));
-    file_put_contents($f . '.sig', $sig . "\n");
-    if (ReleaseChecker::verifySignature($data, $sig, $public) !== true) {
-        fwrite(STDERR, "GREŠKA: provera potpisa nije prošla za $f\n");
-        exit(1);
-    }
-    echo "Potpisano: $f.sig\n";
+} catch (\Throwable $e) {
+    fwrite(STDERR, 'GREŠKA: ' . $e->getMessage() . "\n");
+    exit(1);
+} finally {
+    sodium_memzero($secret);
 }
-sodium_memzero($raw);

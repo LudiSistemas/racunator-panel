@@ -13,6 +13,8 @@ namespace RacunatorPanel\Services;
  *   <koren>/config.php, .htaccess, storage/   ← nikad se ne diraju
  *   <koren>/releases/<verzija>/          ← raspakovan novi paket pre zamene
  *   <koren>/_old/                         ← prethodna verzija posle zamene (do sledećeg ažuriranja)
+ * releases/ i _old/ dobijaju sopstveni .htaccess sa „Require all denied" (protectDir), a paket nosi koreni .htaccess pod
+ * imenom htaccess.dist — u releases/ i _old/ nikad nema aktivnog .htaccess-a sa RewriteEngine koji bi poništio zabranu.
  */
 final class AppFiles
 {
@@ -21,6 +23,16 @@ final class AppFiles
     public const MANIFEST = 'MANIFEST.sha256';
     public const OLD_DIR = '_old';
     public const RELEASES_DIR = 'releases';
+    /** Koreni .htaccess u paketu (postaje .htaccess tek u korenu instalacije). */
+    public const HTACCESS_DIST = 'htaccess.dist';
+
+    /** Sadržaj .htaccess-a za releases/ i _old/: ništa odatle nije dostupno preko veba. */
+    public const DENY_HTACCESS = "# Računator panel — privremeni ili stari fajlovi programa; nikad nisu dostupni preko veba.\n"
+        . "Options -Indexes\n"
+        . "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n"
+        . "<IfModule !mod_authz_core.c>\n    Order allow,deny\n    Deny from all\n</IfModule>\n"
+        . "# <If> se primenjuje posle .htaccess-a poddirektorijuma, pa ni njihovo „Require all granted\" ne poništava zabranu.\n"
+        . "<IfModule mod_authz_core.c>\n    <If \"true\">\n        Require all denied\n    </If>\n</IfModule>\n";
 
     /**
      * Šta sprečava zamenu direktorijuma (prazna lista = može). Premeštanje direktorijuma u drugi roditeljski direktorijum
@@ -92,7 +104,8 @@ final class AppFiles
     }
 
     /**
-     * Proverava MANIFEST.sha256 u raspakovanom paketu: svaki navedeni fajl postoji i ima isti SHA-256.
+     * Proverava MANIFEST.sha256 u raspakovanom paketu: svaki navedeni fajl postoji i ima isti SHA-256, a u direktorijumu
+     * nema nijednog fajla (ni simboličkog linka) kojeg nema u manifestu.
      * @return list<string> greške (prazno = ispravno)
      */
     public static function verifyManifest(string $dir): array
@@ -102,7 +115,7 @@ final class AppFiles
             return ['Paket nema ' . self::MANIFEST . '.'];
         }
         $errors = [];
-        $count = 0;
+        $listed = [];
         foreach (file($file, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
             if ($line === '' || $line[0] === '#') {
                 continue;
@@ -111,18 +124,112 @@ final class AppFiles
                 $errors[] = 'Neispravan red u manifestu: ' . $line;
                 continue;
             }
-            $count++;
+            $listed[$m[2]] = true;
             $path = $dir . '/' . $m[2];
-            if (!is_file($path)) {
+            if (is_link($path) || !is_file($path)) {
                 $errors[] = 'Nedostaje fajl: ' . $m[2];
             } elseif (!hash_equals($m[1], (string) hash_file('sha256', $path))) {
                 $errors[] = 'SHA-256 se ne slaže: ' . $m[2];
             }
         }
-        if ($count === 0) {
+        if ($listed === []) {
             $errors[] = 'Manifest je prazan.';
         }
+        foreach (self::listFiles($dir) as $rel) {
+            if ($rel !== self::MANIFEST && !isset($listed[$rel])) {
+                $errors[] = 'Fajl nije u manifestu: ' . $rel;
+            }
+        }
         return $errors;
+    }
+
+    /**
+     * Relativne putanje svih fajlova i simboličkih linkova u direktorijumu (rekurzivno, linkovi se ne prate).
+     * @return list<string>
+     */
+    public static function listFiles(string $dir, string $prefix = ''): array
+    {
+        $out = [];
+        foreach (scandir($dir) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $dir . '/' . $entry;
+            $rel = $prefix . $entry;
+            if (!is_link($path) && is_dir($path)) {
+                array_push($out, ...self::listFiles($path, $rel . '/'));
+            } else {
+                $out[] = $rel;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Direktorijum u releases/ (pravi releases/ sa zabranom pristupa preko veba). Postojeći direktorijum istog imena se briše.
+     */
+    public static function stagingDir(string $root, string $name): string
+    {
+        if ($name === '' || str_contains($name, '/') || str_contains($name, '\\') || $name === '.' || $name === '..') {
+            throw new \RuntimeException('Neispravno ime privremenog direktorijuma: ' . $name);
+        }
+        $releases = $root . '/' . self::RELEASES_DIR;
+        self::ensureDir($releases);
+        self::protectDir($releases);
+        $dir = $releases . '/' . $name;
+        if (file_exists($dir) || is_link($dir)) {
+            self::removeTree($dir);
+        }
+        return $dir;
+    }
+
+    /** Upisuje .htaccess sa zabranom pristupa (i prazan index.html) u releases/ ili _old/. */
+    public static function protectDir(string $dir): void
+    {
+        $ht = $dir . '/.htaccess';
+        if (!is_file($ht) || (string) @file_get_contents($ht) !== self::DENY_HTACCESS) {
+            if (@file_put_contents($ht, self::DENY_HTACCESS) === false) {
+                throw new \RuntimeException('Ne mogu da upišem ' . $ht . ' (zaštita od pristupa preko veba).');
+            }
+        }
+        if (!is_file($dir . '/index.html')) {
+            @file_put_contents($dir . '/index.html', '');
+        }
+    }
+
+    /**
+     * Posle raspakivanja u releases/: koreni .htaccess (iz rezervne kopije ili starog paketa) postaje neaktivan
+     * htaccess.dist, a config.php iz rezervne kopije se briše (ne vraća se i ne sme da „oživi" kopiju u releases/).
+     */
+    public static function neutralizeStaging(string $dir): void
+    {
+        if (is_file($dir . '/.htaccess')) {
+            if (!is_file($dir . '/' . self::HTACCESS_DIST)) {
+                self::rename($dir . '/.htaccess', $dir . '/' . self::HTACCESS_DIST);
+            } elseif (!@unlink($dir . '/.htaccess')) {
+                throw new \RuntimeException('Ne mogu da obrišem ' . $dir . '/.htaccess');
+            }
+        }
+        foreach (glob($dir . '/config.php*') ?: [] as $cfg) {
+            if (is_file($cfg) && !@unlink($cfg)) {
+                throw new \RuntimeException('Ne mogu da obrišem ' . $cfg);
+            }
+        }
+    }
+
+    /** Briše releases/ ako u njemu nije ostalo ništa osim zaštite (.htaccess, index.html). */
+    public static function removeEmptyStaging(string $root): void
+    {
+        $releases = $root . '/' . self::RELEASES_DIR;
+        if (!is_dir($releases)) {
+            return;
+        }
+        $rest = array_diff(scandir($releases) ?: [], ['.', '..', '.htaccess', 'index.html']);
+        if ($rest === []) {
+            @unlink($releases . '/.htaccess');
+            @unlink($releases . '/index.html');
+            @rmdir($releases);
+        }
     }
 
     /** Verzija iz `src/version.php` datog direktorijuma (ili null). */
@@ -135,6 +242,21 @@ final class AppFiles
         // Fajl vraća samo string; čita se bez izvršavanja da neispravan paket ne bi pokrenuo kod.
         $src = (string) file_get_contents($file);
         return preg_match('/return\s+[\'"]([0-9A-Za-z.\-]+)[\'"]\s*;/', $src, $m) === 1 ? $m[1] : null;
+    }
+
+    /** Verzija iz `src/version.php` unutar ZIP-a (čita se bez izvršavanja), ili null. */
+    public static function versionOfZip(string $zipFile): ?string
+    {
+        if (!class_exists(\ZipArchive::class) || !is_file($zipFile)) {
+            return null;
+        }
+        $zip = new \ZipArchive();
+        if ($zip->open($zipFile) !== true) {
+            return null;
+        }
+        $src = $zip->getFromName('src/version.php');
+        $zip->close();
+        return is_string($src) && preg_match('/return\s+[\'"]([0-9A-Za-z.\-]+)[\'"]\s*;/', $src, $m) === 1 ? $m[1] : null;
     }
 
     /**
@@ -152,6 +274,7 @@ final class AppFiles
             self::removeTree($old);
         }
         self::ensureDir($old);
+        self::protectDir($old);
         $journal = [];
         try {
             foreach (self::APP_DIRS as $dir) {
@@ -290,11 +413,23 @@ final class AppFiles
         return $free === false ? null : (int) $free;
     }
 
-    /** Atomičan upis fajla (privremeni fajl + preimenovanje). */
+    /**
+     * Atomičan upis fajla (privremeni fajl + preimenovanje). Sa $mode, privremeni fajl od početka nastaje sa umask 0077
+     * (nikad nije čitljiv drugima, ni na trenutak), pa dobija tačno $mode pre preimenovanja.
+     */
     public static function writeAtomic(string $file, string $contents, ?int $mode = null): void
     {
         $tmp = $file . '.tmp-' . bin2hex(random_bytes(4));
-        if (@file_put_contents($tmp, $contents, LOCK_EX) === false) {
+        $old = $mode !== null ? umask(0077) : null;
+        try {
+            $ok = @file_put_contents($tmp, $contents, LOCK_EX) !== false;
+        } finally {
+            if ($old !== null) {
+                umask($old);
+            }
+        }
+        if (!$ok) {
+            @unlink($tmp);
             throw new \RuntimeException('Ne mogu da upišem ' . $file);
         }
         if ($mode !== null) {
@@ -304,5 +439,21 @@ final class AppFiles
             @unlink($tmp);
             throw new \RuntimeException('Ne mogu da upišem ' . $file);
         }
+    }
+
+    /** Otvara (pravi) fajl tako da od prvog trenutka ima prava 0600 (umask 0077). @return resource */
+    public static function openPrivate(string $file, string $mode = 'wb')
+    {
+        $old = umask(0077);
+        try {
+            $fp = @fopen($file, $mode);
+        } finally {
+            umask($old);
+        }
+        if ($fp === false) {
+            throw new \RuntimeException('Ne mogu da otvorim ' . $file);
+        }
+        @chmod($file, 0600);
+        return $fp;
     }
 }

@@ -27,6 +27,8 @@ final class Installer
     public const MIN_PASSWORD = 12;
     public const STUB_INFO = 'tmp/installer-stub.json';
     public const TOKEN_FILE = 'tmp/install-token';
+    /** Prefiks fajla kojim vlasnik hostinga dokazuje vlasništvo (pravi ga preko FTP-a u install/). */
+    public const PROOF_PREFIX = 'DOZVOLA-';
 
     /** @var \Closure(\PDO):array{settings:SettingsRepository,users:UserRepository,audit:AuditLogRepository} */
     private \Closure $repos;
@@ -50,9 +52,57 @@ final class Installer
         return $this->root . '/config.php';
     }
 
+    /**
+     * Folder za podatke: `storage` iz config.php (može biti van web root-a), a pre instalacije storage/ u korenu.
+     */
     public function storage(): string
     {
+        if ($this->isInstalled()) {
+            try {
+                $cfg = $this->loadConfig();
+                if (isset($cfg['storage']) && is_string($cfg['storage']) && $cfg['storage'] !== '') {
+                    return rtrim($cfg['storage'], '/');
+                }
+            } catch (\Throwable) {
+            }
+        }
+        return $this->bootStorage();
+    }
+
+    /** storage/ u korenu: tu install fajl ostavlja ključ čarobnjaka i podatke o sebi (pre nego što config.php postoji). */
+    public function bootStorage(): string
+    {
         return $this->root . '/storage';
+    }
+
+    /**
+     * Koren nije koren instalacije nego kopija programa u releases/ ili _old/ (raspakovan paket, prethodna verzija), ili
+     * folder ispod postojeće instalacije. Čarobnjak tada odbija svaki rad — inače bi svako mogao da „instalira" panel
+     * u releases/<verzija>/ dok ažuriranje čeka potvrdu.
+     */
+    public function isNestedCopy(): bool
+    {
+        return self::nestedCopyReason($this->root) !== null;
+    }
+
+    public static function nestedCopyReason(string $root): ?string
+    {
+        $root = rtrim(str_replace('\\', '/', $root), '/');
+        $parent = dirname($root);
+        $base = basename($root);
+        if ($base === AppFiles::OLD_DIR || basename($parent) === AppFiles::OLD_DIR) {
+            return 'Ovo je prethodna verzija programa (folder _old/), a ne instalacija.';
+        }
+        if (basename($parent) === AppFiles::RELEASES_DIR || $base === AppFiles::RELEASES_DIR) {
+            return 'Ovo je raspakovan paket u folderu releases/, a ne instalacija.';
+        }
+        foreach ([$parent, dirname($parent)] as $up) {
+            // Samo Računator panel iznad (config.php + install/Installer.php), da tuđi CMS sa config.php u roditelju ne smeta.
+            if ($up !== $root && $up !== '' && $up !== '.' && $up !== '/' && is_file($up . '/config.php') && is_file($up . '/install/Installer.php')) {
+                return 'Ovaj folder je unutar postojeće instalacije panela (' . $up . ').';
+            }
+        }
+        return null;
     }
 
     /** Postoji config.php — instalacija je urađena (instaler se više ne pokreće kao nova instalacija). */
@@ -89,11 +139,11 @@ final class Installer
      * @param array<string,mixed> $in driver, host, port, name, user, pass
      * @return array{driver:string,dsn:string,user:string,pass:string}
      */
-    public function dbConfig(array $in): array
+    public function dbConfig(array $in, ?string $storage = null): array
     {
         $driver = (string) ($in['driver'] ?? 'mysql');
         if ($driver === 'sqlite') {
-            return ['driver' => 'sqlite', 'dsn' => 'sqlite:' . $this->storage() . '/panel.sqlite', 'user' => '', 'pass' => ''];
+            return ['driver' => 'sqlite', 'dsn' => 'sqlite:' . rtrim($storage ?? $this->storage(), '/') . '/panel.sqlite', 'user' => '', 'pass' => ''];
         }
         if ($driver !== 'mysql') {
             throw new \InvalidArgumentException('Nepoznata vrsta baze.');
@@ -115,11 +165,11 @@ final class Installer
     }
 
     /** „Testiraj vezu": null = u redu, inače poruka na srpskom (bez lozinke). */
-    public function testDatabase(array $db): ?string
+    public function testDatabase(array $db, ?string $storage = null): ?string
     {
         try {
             if ($db['driver'] === 'sqlite') {
-                $this->ensureStorage();
+                $this->ensureStorage($storage);
             }
             $pdo = Connection::open($db);
             if ($db['driver'] === 'mysql') {
@@ -255,10 +305,42 @@ final class Installer
         return $errors;
     }
 
-    /** Pravi storage/{backups,tmp,logs} i storage/.htaccess (zabrana pristupa). */
-    public function ensureStorage(): void
+    /**
+     * Folder za podatke van web root-a (ili podrazumevani storage/ u korenu): apsolutna putanja, bez „..", ne u public/,
+     * upisiv (pravi se ako ne postoji). Vraća normalizovanu putanju ili baca izuzetak sa porukom.
+     * @param string $documentRoot DOCUMENT_ROOT servera (prazno = nepoznat)
+     */
+    public function normalizeStorage(string $path, string $documentRoot = ''): string
     {
-        $s = $this->storage();
+        $path = rtrim(trim(str_replace('\\', '/', $path)), '/');
+        if ($path === '' || $path === $this->bootStorage()) {
+            return $this->bootStorage();
+        }
+        if ($path[0] !== '/' || preg_match('#(^|/)\.\.?(/|$)|[\x00-\x1F]#', $path) === 1) {
+            throw new \InvalidArgumentException('Folder za podatke mora biti apsolutna putanja (npr. /home/nalog/racunator-podaci), bez „..".');
+        }
+        $root = rtrim(str_replace('\\', '/', (string) (realpath($this->root) ?: $this->root)), '/');
+        $real = is_dir($path) ? rtrim(str_replace('\\', '/', (string) realpath($path)), '/') : $path;
+        if ($real === $root || str_starts_with($real . '/', $root . '/')) {
+            throw new \InvalidArgumentException('Izabrani folder je unutar foldera panela — izaberite folder van web root-a ili ostavite podrazumevani storage/.');
+        }
+        $doc = rtrim(str_replace('\\', '/', (string) (realpath($documentRoot) ?: $documentRoot)), '/');
+        if ($doc !== '' && ($real === $doc || str_starts_with($real . '/', $doc . '/'))) {
+            throw new \InvalidArgumentException('Izabrani folder je unutar web root-a (' . $doc . ') — bio bi dostupan preko veba. Izaberite folder iznad njega.');
+        }
+        if (!is_dir($path) && !@mkdir($path, 0700, true) && !is_dir($path)) {
+            throw new \InvalidArgumentException('Ne mogu da napravim folder ' . $path . ' (prava pisanja ili open_basedir).');
+        }
+        if (!is_writable($path)) {
+            throw new \InvalidArgumentException('PHP ne može da piše u ' . $path . '.');
+        }
+        return rtrim(str_replace('\\', '/', (string) realpath($path)), '/');
+    }
+
+    /** Pravi storage/{backups,tmp,logs} i storage/.htaccess (zabrana pristupa). */
+    public function ensureStorage(?string $storage = null): void
+    {
+        $s = rtrim($storage ?? $this->storage(), '/');
         foreach (['', '/backups', '/tmp', '/logs'] as $d) {
             AppFiles::ensureDir($s . $d, 0755);
         }
@@ -273,7 +355,7 @@ final class Installer
 
     /**
      * Cela instalacija.
-     * @param array{db:array,public_url:string,admin_username:string,admin_password:string,accountant_name:string,ip?:string} $in
+     * @param array{db:array,public_url:string,admin_username:string,admin_password:string,accountant_name:string,ip?:string,storage?:string} $in
      * @return array{version:string,public_url:string,migrations:list<string>,user_id:int}
      */
     public function install(array $in): array
@@ -288,20 +370,23 @@ final class Installer
         }
         $db = $in['db'];
         $version = self::appVersion($this->root);
+        $storage = rtrim((string) ($in['storage'] ?? $this->bootStorage()), '/');
 
-        $this->ensureStorage();
+        $this->ensureStorage($storage);
         $config = [
             'db' => ['driver' => $db['driver'], 'dsn' => $db['dsn'], 'user' => (string) $db['user'], 'pass' => (string) $db['pass']],
             'public_url' => $publicUrl,
             'app_key' => bin2hex(random_bytes(32)),
-            'storage' => $this->storage(),
+            'storage' => $storage,
         ];
-        // Privremeni config odmah: ako koren nije upisiv, greška je pre bilo kakve izmene baze.
+        // Privremeni config odmah: ako koren nije upisiv, greška je pre bilo kakve izmene baze. Fajl od prvog trenutka
+        // ima prava 0600 (umask 0077), pa lozinka baze nikad nije čitljiva drugim nalozima na serveru.
         $tmp = $this->configFile() . '.instalacija';
-        if (@file_put_contents($tmp, self::configContents($config), LOCK_EX) === false) {
+        try {
+            AppFiles::writeAtomic($tmp, self::configContents($config), 0600);
+        } catch (\RuntimeException) {
             throw new \RuntimeException('Ne mogu da upišem config.php u ' . $this->root . ' — proverite prava pisanja.');
         }
-        @chmod($tmp, 0600);
 
         $sqliteFile = $db['driver'] === 'sqlite' ? substr($db['dsn'], 7) : null;
         $sqliteExisted = $sqliteFile !== null && is_file($sqliteFile);
@@ -347,7 +432,7 @@ final class Installer
             }
             throw $e;
         }
-        @unlink($this->storage() . '/' . self::TOKEN_FILE);
+        @unlink($this->bootStorage() . '/' . self::TOKEN_FILE);
         return ['version' => $version, 'public_url' => $publicUrl, 'migrations' => $migrations, 'user_id' => $admin->id];
     }
 
@@ -369,17 +454,18 @@ final class Installer
      * Provera da panel odgovara na javnoj adresi: GET <public_url>/health → {"ok":true}.
      * @return array{ok:bool,message:string}
      */
-    public static function checkHealth(HttpClient $http, string $publicUrl): array
+    public static function checkHealth(HttpClient $http, string $publicUrl, string $appKey = ''): array
     {
         try {
-            $res = $http->get(rtrim($publicUrl, '/') . '/health', ['Accept' => 'application/json', 'User-Agent' => 'racunator-panel-instaler']);
+            $res = $http->get(rtrim($publicUrl, '/') . '/health', Updater::healthHeaders($appKey, 'racunator-panel-instaler'));
         } catch (\Throwable $e) {
             return ['ok' => false, 'message' => 'Server nije mogao da pozove sam sebe (' . $e->getMessage() . '). Otvorite '
                 . rtrim($publicUrl, '/') . '/health u pregledaču — treba da piše {"ok":true,…}.'];
         }
         $json = json_decode($res['body'], true);
         if ($res['status'] === 200 && is_array($json) && ($json['ok'] ?? false) === true) {
-            return ['ok' => true, 'message' => 'Panel odgovara na ' . rtrim($publicUrl, '/') . '/health (verzija ' . ($json['version'] ?? '?') . ').'];
+            return ['ok' => true, 'message' => 'Panel odgovara na ' . rtrim($publicUrl, '/') . '/health'
+                . (isset($json['version']) && is_string($json['version']) ? ' (verzija ' . $json['version'] . ').' : '.')];
         }
         return ['ok' => false, 'message' => '/health je vratio status ' . $res['status'] . '. Najčešći uzrok: mod_rewrite ili AllowOverride '
             . 'nisu uključeni, ili javna adresa ne odgovara folderu instalacije.'];
@@ -388,7 +474,7 @@ final class Installer
     /** Briše samoraspakujući install fajl iz korena (ako je zapisan pri raspakivanju). Vraća ime obrisanog fajla ili null. */
     public function removeStub(): ?string
     {
-        $info = $this->storage() . '/' . self::STUB_INFO;
+        $info = $this->bootStorage() . '/' . self::STUB_INFO;
         if (!is_file($info)) {
             return null;
         }
@@ -409,18 +495,66 @@ final class Installer
         return @unlink($path) ? $name : null;
     }
 
-    /** Provera tokena koji je install fajl dao čarobnjaku (sprečava da neko drugi završi instalaciju). */
+    /**
+     * Provera tokena koji je install fajl dao čarobnjaku (sprečava da neko drugi završi instalaciju). Bez fajla tokena
+     * odgovor je uvek „ne": ručno otpremljeni fajlovi (bez install fajla) traže dokaz vlasništva (proofFile) ili
+     * `php install/cli.php dozvola`.
+     */
     public function tokenMatches(?string $tokenHash): bool
     {
-        $file = $this->storage() . '/' . self::TOKEN_FILE;
-        if (!is_file($file)) {
-            return true; // ručno otpremljeni fajlovi bez install fajla — nema tokena
+        $file = $this->bootStorage() . '/' . self::TOKEN_FILE;
+        if (!is_file($file) || $tokenHash === null || $tokenHash === '') {
+            return false;
         }
-        return $tokenHash !== null && hash_equals(trim((string) file_get_contents($file)), $tokenHash);
+        $stored = trim((string) file_get_contents($file));
+        return $stored !== '' && hash_equals($stored, $tokenHash);
     }
 
     public function hasToken(): bool
     {
-        return is_file($this->storage() . '/' . self::TOKEN_FILE);
+        return is_file($this->bootStorage() . '/' . self::TOKEN_FILE);
+    }
+
+    /**
+     * Izdaje nov ključ čarobnjaka (posle dokaza vlasništva ili iz CLI-ja) i vraća ga u čistom obliku; u fajlu je samo heš.
+     * Postojeći ključ se zamenjuje — ko dokaže vlasništvo, preuzima instalaciju.
+     */
+    public function issueToken(): string
+    {
+        AppFiles::ensureDir($this->bootStorage() . '/tmp', 0755);
+        $token = bin2hex(random_bytes(16));
+        AppFiles::writeAtomic($this->bootStorage() . '/' . self::TOKEN_FILE, hash('sha256', $token), 0600);
+        return $token;
+    }
+
+    /** Ime fajla za dokaz vlasništva za dati nasumični niz (32 heks znaka). */
+    public static function proofFileName(string $nonce): string
+    {
+        if (preg_match('/^[0-9a-f]{32}$/', $nonce) !== 1) {
+            throw new \InvalidArgumentException('Neispravan niz za dokaz vlasništva.');
+        }
+        return self::PROOF_PREFIX . $nonce . '.txt';
+    }
+
+    /** Putanja fajla za dokaz vlasništva (u install/ — tu ga vlasnik pravi preko FTP-a). */
+    public function proofFile(string $nonce): string
+    {
+        return $this->root . '/install/' . self::proofFileName($nonce);
+    }
+
+    /**
+     * Dokaz vlasništva: fajl install/DOZVOLA-<nonce>.txt postoji (napravio ga je neko ko ima FTP pristup). Fajl se
+     * briše, a stari fajlovi za dokaz (drugi nizovi) takođe.
+     */
+    public function consumeProof(string $nonce): bool
+    {
+        $file = $this->proofFile($nonce);
+        if (!is_file($file) || is_link($file)) {
+            return false;
+        }
+        foreach (glob($this->root . '/install/' . self::PROOF_PREFIX . '*') ?: [] as $f) {
+            @unlink($f);
+        }
+        return true;
     }
 }

@@ -111,6 +111,30 @@ final class ReleaseCheckerTest extends InstallTestCase
         $this->assertNull(ReleaseChecker::sumFor($sums, 'drugo.zip'));
     }
 
+    public function testZvanicnaAdresaPreuzimanja(): void
+    {
+        $ok = ReleaseChecker::DOWNLOAD_PREFIX . 'v1.2.0/racunator-panel-1.2.0.zip';
+        $this->assertTrue(ReleaseChecker::isOfficialDownloadUrl($ok));
+        $this->assertTrue(ReleaseChecker::isOfficialDownloadUrl('https://objects.githubusercontent.com/github-production-release-asset/1/2'));
+        foreach ([
+            'http://github.com/LudiSistemas/racunator-panel/releases/download/v1.2.0/a.zip',           // samo https
+            'https://github.com.zlo.rs/LudiSistemas/racunator-panel/releases/download/v1.2.0/a.zip',   // tuđ host
+            'https://github.com/Zlo/racunator-panel/releases/download/v1.2.0/a.zip',                   // tuđ repo
+            ReleaseChecker::DOWNLOAD_PREFIX . 'v1.2.0/../../../../Zlo/x/releases/download/v1/a.zip',   // „.."
+            ReleaseChecker::DOWNLOAD_PREFIX . '%2e%2e/a.zip',                                          // kodirana tačka
+            ReleaseChecker::DOWNLOAD_PREFIX . 'v1.2.0%2Fa.zip',                                        // kodirana kosa crta
+            ReleaseChecker::DOWNLOAD_PREFIX . 'v1.2.0/a.zip?x=1',
+            ReleaseChecker::DOWNLOAD_PREFIX . 'v1.2.0/a.zip#x',
+            'https://u:p@github.com/LudiSistemas/racunator-panel/releases/download/v1.2.0/a.zip',
+            'https://github.com:8443/LudiSistemas/racunator-panel/releases/download/v1.2.0/a.zip',
+            ReleaseChecker::DOWNLOAD_PREFIX . 'v1.2.0/a b.zip',
+            ReleaseChecker::DOWNLOAD_PREFIX . 'a.zip',                                                  // nema taga
+            '',
+        ] as $bad) {
+            $this->assertFalse(ReleaseChecker::isOfficialDownloadUrl($bad), $bad);
+        }
+    }
+
     public function testPotpisEd25519(): void
     {
         if (!function_exists('sodium_crypto_sign_keypair')) {

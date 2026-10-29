@@ -12,7 +12,7 @@ use function RacunatorPanel\Kernel\e;
     <li>Panel prelazi u režim održavanja: aplikacija Računator dobija „pokušaj kasnije" i sama ponavlja slanje posle ažuriranja.</li>
     <li>Pravi se <strong>rezervna kopija</strong> svih fajlova panela i cele baze (u storage/backups/).</li>
     <li>Preuzima se paket <?= e($release->zipName()) ?><?= $release->zipSize !== null ? ' (' . e(number_format($release->zipSize / 1048576, 1, ',', '.')) . ' MB)' : '' ?>
-      sa GitHub-a i proverava se SHA-256<?= $signatureCheck ? ' i digitalni potpis' : ' (digitalni potpis ne može da se proveri na ovom hostingu)' ?>.</li>
+      sa GitHub-a i proverava se SHA-256 i digitalni potpis (Ed25519); paket sa neispravnim ili bez potpisa se odbija.</li>
     <li>Menjaju se fajlovi programa (public/, src/, install/, docs/). <strong>Ostaju netaknuti:</strong> config.php, baza, korisnici, ključevi,
       nalozi, podešavanja, vaš .htaccess i storage/.</li>
     <li>Baza se prilagođava novoj verziji (migracije), pa panel sam proverava da radi.</li>

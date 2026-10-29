@@ -7,6 +7,60 @@ use RacunatorPanel\Services\Backup;
 
 final class BackupTest extends InstallTestCase
 {
+    public function testSqlVrednostiSuHeksBezPrelomaReda(): void
+    {
+        $this->assertSame('NULL', Backup::sqlValue(null));
+        $this->assertSame('42', Backup::sqlValue(42));
+        $this->assertSame("'42'", Backup::sqlValue('42'));
+        $this->assertSame("'012345678'", Backup::sqlValue('012345678'), 'PIB sa vodećom nulom ostaje tekst');
+        $this->assertSame("''", Backup::sqlValue(''));
+        $v = Backup::sqlValue("napomena;\nsa '\\' i ;\r\n");
+        $this->assertStringStartsWith("_utf8mb4 X'", $v);
+        $this->assertDoesNotMatchRegularExpression('/[\r\n;\\\\]/', $v);
+        $this->assertSame("napomena;\nsa '\\' i ;\r\n", hex2bin(substr($v, 11, -1)));
+        $this->assertStringStartsWith("_binary X'", Backup::sqlValue("\xff\xfe"));
+    }
+
+    /**
+     * Prava MySQL/MariaDB baza (env RACUNATOR_TEST_MYSQL_DSN, npr. iz tools/docker/test-install.sh): napomena sa
+     * prelomom reda i „;" preživljava kopiju i povratak i uz sql_mode NO_BACKSLASH_ESCAPES.
+     */
+    public function testMysqlKopijaSaPrelomomRedaINoBackslashEscapes(): void
+    {
+        $dsn = (string) getenv('RACUNATOR_TEST_MYSQL_DSN');
+        if ($dsn === '') {
+            $this->markTestSkipped('nema RACUNATOR_TEST_MYSQL_DSN');
+        }
+        $pdo = \RacunatorPanel\Db\Connection::open(['driver' => 'mysql', 'dsn' => $dsn,
+            'user' => (string) getenv('RACUNATOR_TEST_MYSQL_USER'), 'pass' => (string) getenv('RACUNATOR_TEST_MYSQL_PASS')]);
+        $pdo->exec("SET SESSION sql_mode = CONCAT(@@sql_mode, ',NO_BACKSLASH_ESCAPES')");
+        $pdo->exec('DROP TABLE IF EXISTS rp_kopija_test');
+        $pdo->exec('CREATE TABLE rp_kopija_test (id INT PRIMARY KEY, napomena TEXT, iznos BIGINT, kad DATETIME) DEFAULT CHARSET=utf8mb4');
+        $tricky = "prvi red;\ndrugi red sa ' i \\ i ;\r\nčćžšđ;";
+        $pdo->prepare('INSERT INTO rp_kopija_test VALUES (1, ?, 123456, ?)')->execute([$tricky, '2026-10-29 12:00:00']);
+        $pdo->exec("INSERT INTO rp_kopija_test VALUES (2, ';', -5, NULL)");
+        $root = $this->tmp . '/root';
+        mkdir($root . '/storage', 0755, true);
+        $this->makeApp($root, '1.0.0');
+        try {
+            $b = new Backup($root, $pdo, null, ['rp_kopija_test']);
+            $meta = $b->create('1.0.0');
+            $sql = (string) file_get_contents($b->dir() . '/' . $meta['name'] . '/baza.sql');
+            $this->assertStringNotContainsString('drugi red', $sql, 'tekst je heks literal');
+            $pdo->exec("UPDATE rp_kopija_test SET napomena = 'pokvareno'");
+            $b->restoreDatabase($meta['name']);
+            $rows = $pdo->query('SELECT id, napomena, iznos, kad FROM rp_kopija_test ORDER BY id')->fetchAll(\PDO::FETCH_ASSOC);
+            $this->assertSame($tricky, $rows[0]['napomena']);
+            $this->assertSame(123456, (int) $rows[0]['iznos']);
+            $this->assertSame('2026-10-29 12:00:00', $rows[0]['kad']);
+            $this->assertSame(';', $rows[1]['napomena']);
+            $this->assertSame(-5, (int) $rows[1]['iznos']);
+            $this->assertNull($rows[1]['kad']);
+        } finally {
+            $pdo->exec('DROP TABLE IF EXISTS rp_kopija_test');
+        }
+    }
+
     public function testKopijaIPovratakSqliteBaze(): void
     {
         $i = $this->installation('1.0.0');
@@ -82,6 +136,13 @@ final class BackupTest extends InstallTestCase
         $this->assertCount(5, array_unique($names));
         $this->assertSame('1.0.4', $list[0]['version']);
 
+        foreach ($names as $n) {
+            $this->assertMatchesRegularExpression('/^\d{8}-\d{6}-\d{1,4}-[0-9a-f]{16}$/', $n, 'ime kopije ima nasumičan sufiks');
+        }
+        $this->assertTrue(Backup::validName('20261029-120000'), 'stari oblik imena i dalje važi');
+        $this->assertTrue(Backup::validName('20261029-120000-2'));
+        $this->assertFalse(Backup::validName('20261029-120000-1-ABC'));
+        $this->assertSame('0600', substr(sprintf('%o', fileperms($b->dir() . '/' . $names[4] . '/podaci.json')), -4));
         $this->assertNull($b->find('../../etc'));
         $this->assertNull($b->filePath($names[4], '../config.php'));
         $this->assertNull($b->filePath('20261029-999999', Backup::FILES_ZIP));

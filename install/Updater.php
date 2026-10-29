@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace RacunatorPanel\Install;
 
+use RacunatorPanel\App;
 use RacunatorPanel\Db\Migrator;
 use RacunatorPanel\Repositories\AuditLogRepository;
 use RacunatorPanel\Repositories\SettingsRepository;
@@ -16,10 +17,13 @@ use RacunatorPanel\Services\ReleaseInfo;
 
 /**
  * Ažuriranje i povratak (plan §5a). Isti kod koriste panel (/azuriranje, paket sa GitHub-a) i install fajl nad postojećom
- * instalacijom (paket već raspakovan u releases/<v>/, bez mreže).
+ * instalacijom (ZIP i potpis koje je install fajl ostavio u storage/tmp/manual-update/, bez mreže).
  *
- * Tok: preduslovi → maintenance.flag → rezervna kopija → paket (preuzimanje + SHA-256 + Ed25519, ili lokalni) →
- * releases/<v>/ → zamena direktorijuma (trenutni u _old/) → migracije → settings.version → /health → kraj održavanja.
+ * Tok: preduslovi → maintenance.flag → rezervna kopija → paket (preuzimanje ili lokalni ZIP; SHA-256 i Ed25519 nad istim
+ * bajtovima pročitanim sa diska neposredno pre raspakivanja) → releases/<v>/ (bez aktivnog .htaccess-a, zabranjen preko
+ * veba) → provera manifesta (i da nema viška fajlova) → zamena direktorijuma (trenutni u _old/) → migracije →
+ * settings.version → /health → kraj održavanja.
+ * Mrežno ažuriranje zahteva proveru potpisa (ekstenzija sodium + javni ključ); bez nje se nudi ručno ažuriranje.
  * Greška posle zamene → automatski povratak: _old/ nazad, baza iz kopije ako su migracije krenule.
  * Svaki korak ide u storage/logs/update.log; rezultat poslednjeg pokretanja u storage/logs/update-last.json.
  *
@@ -41,6 +45,8 @@ class Updater
     private ?array $inFlight = null;
     /** Javni Ed25519 ključ za proveru potpisa paketa (base64); podrazumevano ReleaseChecker::PUBLIC_KEY. */
     protected readonly string $publicKey;
+    /** app_key instalacije (iz config.php): od njega se pravi zaglavlje uz koje /health vraća i verziju. */
+    protected readonly string $appKey;
 
     public function __construct(
         protected readonly string $root,
@@ -51,9 +57,36 @@ class Updater
         protected readonly string $publicUrl = '',
         ?string $storage = null,
         ?string $publicKey = null,
+        ?string $appKey = null,
     ) {
         $this->storage = rtrim($storage ?? $root . '/storage', '/');
         $this->publicKey = $publicKey ?? ReleaseChecker::PUBLIC_KEY;
+        $this->appKey = $appKey ?? self::appKeyFromConfig($root);
+    }
+
+    /** app_key iz config.php instalacije ('' ako ga nema). */
+    private static function appKeyFromConfig(string $root): string
+    {
+        $file = $root . '/config.php';
+        $cfg = is_file($file) ? (static fn (string $f): mixed => require $f)($file) : null;
+        return is_array($cfg) && is_string($cfg['app_key'] ?? null) ? $cfg['app_key'] : '';
+    }
+
+    /**
+     * Zaglavlja za GET /health: neprijavljenima /health vraća samo {"ok":true}, a uz zaglavlje sa tokenom izvedenim iz
+     * app_key (App::HEALTH_TOKEN_HEADER, App::healthToken) vraća i verziju — potrebno za samoproveru posle zamene.
+     * @return array<string,string>
+     */
+    public static function healthHeaders(string $appKey, string $userAgent): array
+    {
+        $h = ['Accept' => 'application/json', 'User-Agent' => $userAgent];
+        if ($appKey !== '' && class_exists(App::class) && method_exists(App::class, 'healthToken')) {
+            $token = App::healthToken($appKey);
+            if ($token !== '') {
+                $h[App::HEALTH_TOKEN_HEADER] = $token;
+            }
+        }
+        return $h;
     }
 
     public function currentVersion(): string
@@ -97,6 +130,12 @@ class Updater
             if ($this->http === null || ($this->http instanceof NativeHttpClient && !NativeHttpClient::available())) {
                 $p[] = 'Hosting ne dozvoljava odlazne HTTP pozive (nema curl, allow_url_fopen isključen). Koristite ručno ažuriranje install fajlom.';
             }
+            if (!static::sodiumAvailable()) {
+                $p[] = 'Hosting nema PHP ekstenziju „sodium", pa panel ne može da proveri digitalni potpis paketa — ažuriranje preko mreže '
+                    . 'je zato isključeno. Zatražite od hostinga ekstenziju sodium ili ažurirajte ručno install fajlom (vidi docs/azuriranje.md).';
+            } elseif (!ReleaseChecker::publicKeyConfigured($this->publicKey)) {
+                $p[] = 'Ova verzija panela nema javni ključ za proveru potpisa — ažuriranje preko mreže nije moguće. Ažurirajte ručno install fajlom.';
+            }
         }
         $need = 3 * ($packageBytes ?? self::DEFAULT_PACKAGE_BYTES);
         $free = AppFiles::freeSpace($this->root);
@@ -114,20 +153,109 @@ class Updater
             fn (): string => $this->fetchRelease($release, $userId, $ip));
     }
 
-    /** Ručno ažuriranje iz već raspakovanog paketa (install fajl nad postojećom instalacijom). */
-    public function updateFromDirectory(string $dir, ?int $userId, string $ip): array
+    /** Hosting ima funkcije za proveru Ed25519 potpisa. Zasebna metoda da bi testovi mogli da je podmetnu. */
+    protected static function sodiumAvailable(): bool
+    {
+        return function_exists('sodium_crypto_sign_verify_detached');
+    }
+
+    /** Potpis paketa može da se proveri (sodium i javni ključ). */
+    public function canVerifySignatures(): bool
+    {
+        return static::sodiumAvailable() && ReleaseChecker::publicKeyConfigured($this->publicKey);
+    }
+
+    /**
+     * Ručno ažuriranje iz lokalnog ZIP-a (install fajl nad postojećom instalacijom ga ostavlja u storage/tmp/manual-update/
+     * zajedno sa potpisom). Potpis je obavezan; ako hosting ne može da ga proveri (nema sodium), ažuriranje ide samo uz
+     * $allowUnverified — administrator je potvrdio da je SHA-256 install fajla uporedio sa SHA256SUMS sa stranice izdanja.
+     */
+    public function updateFromPackage(string $zipFile, ?string $sigFile, ?int $userId, string $ip, bool $allowUnverified = false, ?string $version = null): array
     {
         $from = $this->currentVersion();
-        $to = AppFiles::versionOf($dir) ?? '?';
-        return $this->run('rucno', $from, $to, $userId, $ip, AppFiles::treeSize($dir), false,
-            function () use ($dir): string {
-                $errors = AppFiles::verifyManifest($dir);
-                if ($errors !== []) {
-                    throw new \RuntimeException('Paket nije ispravan: ' . implode('; ', array_slice($errors, 0, 5)));
-                }
-                $this->step('paket', 'ok', 'Lokalni paket ' . basename($dir) . ' je proveren (SHA-256 svih fajlova).');
-                return $dir;
-            });
+        $to = $version ?? AppFiles::versionOfZip($zipFile) ?? '?';
+        $sig = $sigFile !== null && is_file($sigFile) ? trim((string) file_get_contents($sigFile)) : '';
+        // Bez potpisa (ili bez mogućnosti provere i bez potvrde administratora) ništa se ne menja: ni održavanje, ni kopija.
+        if ($sig === '') {
+            return $this->reject('rucno', $from, $to, 'Install fajl nema digitalni potpis paketa — ručno ažuriranje je odbijeno. Preuzmite '
+                . 'racunator-panel-install.php sa zvanične stranice izdanja na GitHub-u i otpremite ga ponovo.');
+        }
+        if (!$this->canVerifySignatures() && !$allowUnverified) {
+            return $this->reject('rucno', $from, $to, 'Potpis paketa ne može da se proveri (nema ekstenzije sodium ili javnog ključa) — '
+                . 'ažuriranje je odbijeno. Uporedite SHA-256 install fajla sa SHA256SUMS na stranici izdanja i potvrdite to izričito.');
+        }
+        $bytes = is_file($zipFile) ? 2 * (int) filesize($zipFile) : null;
+        return $this->run('rucno', $from, $to, $userId, $ip, $bytes, false,
+            fn (): string => $this->stageVerified($zipFile, null, $sig, $allowUnverified, $userId, $ip, $to));
+    }
+
+    /** Odbijanje pre bilo kakve izmene (bez brave, održavanja i rezervne kopije). */
+    private function reject(string $kind, string $from, string $to, string $error): array
+    {
+        $this->steps = [];
+        $this->step('pocetak', 'info', 'Ručno ažuriranje ' . $from . ' → ' . $to . '.');
+        $result = ['ok' => false, 'kind' => $kind, 'from' => $from, 'to' => $to, 'backup' => null, 'error' => null,
+            'rolled_back' => false, 'started_at' => gmdate('Y-m-d\TH:i:s\Z')];
+        return $this->finish($result, $error, false);
+    }
+
+    /**
+     * Čita ZIP sa diska jednom, proverava SHA-256 (ako je zadat) i potpis nad TIM bajtovima, upisuje ih u novi privatni
+     * fajl iz kog se odmah raspakuje u releases/<v>/ i proverava manifest. Vraća direktorijum raspakovanog paketa.
+     */
+    private function stageVerified(string $zipFile, ?string $expectedSha, string $sig, bool $allowUnverified, ?int $userId, string $ip, string $to): string
+    {
+        $data = @file_get_contents($zipFile);
+        if ($data === false || $data === '') {
+            throw new \RuntimeException('Paket ' . basename($zipFile) . ' ne može da se pročita.');
+        }
+        if ($expectedSha !== null) {
+            if (!hash_equals($expectedSha, hash('sha256', $data))) {
+                throw new \RuntimeException('SHA-256 paketa se ne slaže sa SHA256SUMS — paket je oštećen ili podmetnut.');
+            }
+            $this->step('sha256', 'ok', 'SHA-256 paketa se slaže sa SHA256SUMS.');
+        }
+        if ($this->canVerifySignatures()) {
+            if (ReleaseChecker::verifySignature($data, $sig, $this->publicKey) !== true) {
+                throw new \RuntimeException('Digitalni potpis paketa nije ispravan — paket je odbijen.');
+            }
+            $this->step('potpis', 'ok', 'Digitalni potpis (Ed25519) je ispravan.');
+        } elseif ($allowUnverified) {
+            $why = !static::sodiumAvailable() ? 'hosting nema PHP ekstenziju sodium' : 'javni ključ za potpis nije postavljen u ovoj verziji';
+            $this->step('potpis', 'warn', 'Potpis nije proveren (' . $why . '); administrator je potvrdio SHA-256 install fajla.');
+            $this->safeAudit($userId, 'update.warning', $ip, ['to' => $to, 'warning' => 'ručno ažuriranje bez provere potpisa: ' . $why]);
+        } else {
+            throw new \RuntimeException('Potpis paketa ne može da se proveri (nema ekstenzije sodium ili javnog ključa) — ažuriranje je odbijeno.');
+        }
+
+        // Proverene bajtove raspakujemo iz sopstvenog privatnog fajla (0700 folder), ne iz fajla koji je neko mogao da zameni.
+        $work = $this->storage . '/tmp/provereno-' . bin2hex(random_bytes(6));
+        AppFiles::ensureDir($work, 0700);
+        try {
+            $verified = $work . '/paket.zip';
+            $fp = AppFiles::openPrivate($verified, 'xb');
+            $ok = fwrite($fp, $data) === strlen($data);
+            fclose($fp);
+            if (!$ok) {
+                throw new \RuntimeException('Ne mogu da upišem proveren paket (prostor na disku?).');
+            }
+            $dest = AppFiles::stagingDir($this->root, $to);
+            AppFiles::extractZip($verified, $dest);
+        } finally {
+            AppFiles::removeTree($work);
+        }
+        AppFiles::neutralizeStaging($dest);
+        $errors = AppFiles::verifyManifest($dest);
+        if ($errors !== []) {
+            try {
+                AppFiles::removeTree($dest);
+                AppFiles::removeEmptyStaging($this->root);
+            } catch (\Throwable) {
+            }
+            throw new \RuntimeException('Raspakovan paket nije ispravan: ' . implode('; ', array_slice($errors, 0, 5)));
+        }
+        $this->step('raspakivanje', 'ok', 'Paket raspakovan u ' . AppFiles::RELEASES_DIR . '/' . $to . '/ i proveren fajl po fajl.');
+        return $dest;
     }
 
     /**
@@ -246,23 +374,22 @@ class Updater
             }
             return $this->finish($result, 'Preduslovi nisu ispunjeni — ništa nije promenjeno.');
         }
-        $src = $this->root . '/' . AppFiles::RELEASES_DIR . '/vracanje-' . $backupName;
+        $src = null;
         $journal = null;
         $dropAlso = array_values(array_diff($this->ownedTables() ?? [], (array) $meta['tables']));
         try {
             Maintenance::enable($this->storage, 'povratak na ' . $backupName);
             $this->step('odrzavanje', 'ok', 'Uključen režim održavanja.');
-            if (file_exists($src)) {
-                AppFiles::removeTree($src);
-            }
+            $src = AppFiles::stagingDir($this->root, 'vracanje-' . $backupName);
             AppFiles::extractZip($backup->dir() . '/' . $backupName . '/' . Backup::FILES_ZIP, $src);
+            AppFiles::neutralizeStaging($src);
             $journal = AppFiles::swapIn($this->root, $src);
             $this->step('fajlovi', 'ok', 'Vraćeni fajlovi verzije ' . $result['to'] . '.');
             $backup->restoreDatabase($backupName, $dropAlso);
             $this->step('baza', 'ok', 'Vraćena baza iz kopije.');
         } catch (\Throwable $e) {
             $this->step('greska', 'fail', $e->getMessage());
-            if ($journal !== null) {
+            if ($journal !== null && $src !== null) {
                 try {
                     AppFiles::undoSwap($this->root, $src, $journal);
                     $this->step('povratak', 'warn', 'Fajlovi su vraćeni na stanje pre pokušaja. Baza možda nije potpuno vraćena — proverite panel.');
@@ -272,7 +399,8 @@ class Updater
             }
             Maintenance::disable($this->storage);
             try {
-                AppFiles::removeTree($src);
+                $src !== null && AppFiles::removeTree($src);
+                AppFiles::removeEmptyStaging($this->root);
             } catch (\Throwable) {
             }
             $this->safeAudit($userId, 'update.revert_failed', $ip, ['backup' => $backupName, 'error' => $e->getMessage()]);
@@ -281,6 +409,7 @@ class Updater
         Maintenance::disable($this->storage);
         try {
             AppFiles::removeTree($src);
+            AppFiles::removeEmptyStaging($this->root);
         } catch (\Throwable) {
         }
         $this->step('kraj', 'ok', 'Vraćena verzija ' . ($this->settings->get('version') ?? $result['to']) . '.');
@@ -302,7 +431,7 @@ class Updater
             return 'nedostupno';
         }
         try {
-            $res = $this->http->get(rtrim($this->publicUrl, '/') . '/health', ['Accept' => 'application/json', 'User-Agent' => 'racunator-panel-azuriranje']);
+            $res = $this->http->get(rtrim($this->publicUrl, '/') . '/health', self::healthHeaders($this->appKey, 'racunator-panel-azuriranje'));
         } catch (\Throwable) {
             return 'nedostupno';
         }
@@ -342,13 +471,17 @@ class Updater
         if ($this->http === null) {
             throw new \RuntimeException('Nema HTTP klijenta za preuzimanje.');
         }
-        foreach (['zip' => $r->zipUrl, 'SHA256SUMS' => $r->sumsUrl] as $what => $url) {
-            if ($url === null) {
-                throw new \RuntimeException('Izdanje ' . $r->tag . ' nema ' . $what . ' među fajlovima — ažuriranje nije moguće.');
-            }
+        if (!$this->canVerifySignatures()) {
+            throw new \RuntimeException('Potpis paketa ne može da se proveri na ovom hostingu (nema ekstenzije sodium ili javnog ključa) — '
+                . 'ažuriranje preko mreže je odbijeno. Ažurirajte ručno install fajlom (vidi docs/azuriranje.md).');
         }
-        foreach ([$r->zipUrl, $r->sumsUrl, $r->sigUrl] as $url) {
-            if ($url !== null && !str_starts_with($url, ReleaseChecker::DOWNLOAD_PREFIX)) {
+        foreach (['zip' => $r->zipUrl, 'SHA256SUMS' => $r->sumsUrl, 'potpis (.sig)' => $r->sigUrl] as $what => $url) {
+            if ($url === null) {
+                throw new \RuntimeException($what === 'potpis (.sig)'
+                    ? 'Izdanje nema digitalni potpis (.sig) — paket je odbijen.'
+                    : 'Izdanje ' . $r->tag . ' nema ' . $what . ' među fajlovima — ažuriranje nije moguće.');
+            }
+            if (!ReleaseChecker::isOfficialDownloadUrl($url)) {
                 throw new \RuntimeException('Adresa paketa nije na zvaničnom repou (' . $url . ').');
             }
         }
@@ -358,45 +491,23 @@ class Updater
         }
         AppFiles::ensureDir($tmp, 0700);
         $zipFile = $tmp . '/' . $r->zipName();
-        $zip = $this->download($r->zipUrl);
-        file_put_contents($zipFile, $zip);
+        $zip = $this->download((string) $r->zipUrl);
+        $fp = AppFiles::openPrivate($zipFile, 'xb');
+        $written = fwrite($fp, $zip);
+        fclose($fp);
+        if ($written !== strlen($zip)) {
+            throw new \RuntimeException('Ne mogu da upišem preuzeti paket (prostor na disku?).');
+        }
         $this->step('preuzimanje', 'ok', 'Preuzet ' . $r->zipName() . ' (' . self::mb(strlen($zip)) . ').');
+        unset($zip);
 
-        $sums = $this->download($r->sumsUrl);
-        $expected = ReleaseChecker::sumFor($sums, $r->zipName());
-        if ($expected === null || !hash_equals($expected, hash('sha256', $zip))) {
-            throw new \RuntimeException('SHA-256 paketa se ne slaže sa SHA256SUMS — paket je oštećen ili podmetnut.');
+        $expected = ReleaseChecker::sumFor($this->download((string) $r->sumsUrl), $r->zipName());
+        if ($expected === null) {
+            throw new \RuntimeException('SHA256SUMS nema red za ' . $r->zipName() . ' — paket je odbijen.');
         }
-        $this->step('sha256', 'ok', 'SHA-256 paketa se slaže sa SHA256SUMS.');
-
-        $sig = $r->sigUrl !== null ? $this->download($r->sigUrl) : null;
-        $verified = $sig !== null ? ReleaseChecker::verifySignature($zip, $sig, $this->publicKey) : null;
-        if ($verified === false) {
-            throw new \RuntimeException('Digitalni potpis paketa nije ispravan — paket je odbijen.');
-        }
-        if ($verified === null) {
-            $why = !function_exists('sodium_crypto_sign_verify_detached') ? 'hosting nema PHP ekstenziju sodium'
-                : (!ReleaseChecker::publicKeyConfigured($this->publicKey) ? 'javni ključ za potpis nije postavljen u ovoj verziji' : 'izdanje nema potpis');
-            if ($sig === null && function_exists('sodium_crypto_sign_verify_detached') && ReleaseChecker::publicKeyConfigured($this->publicKey)) {
-                throw new \RuntimeException('Izdanje nema digitalni potpis (.sig) — paket je odbijen.');
-            }
-            $this->step('potpis', 'warn', 'Potpis nije proveren (' . $why . '); oslanjamo se samo na SHA-256.');
-            $this->safeAudit($userId, 'update.warning', $ip, ['to' => $r->version, 'warning' => 'bez provere potpisa: ' . $why]);
-        } else {
-            $this->step('potpis', 'ok', 'Digitalni potpis (Ed25519) je ispravan.');
-        }
-
-        $dest = $this->root . '/' . AppFiles::RELEASES_DIR . '/' . $r->version;
-        if (file_exists($dest)) {
-            AppFiles::removeTree($dest);
-        }
-        AppFiles::extractZip($zipFile, $dest);
-        $errors = AppFiles::verifyManifest($dest);
-        if ($errors !== []) {
-            throw new \RuntimeException('Raspakovan paket nije ispravan: ' . implode('; ', array_slice($errors, 0, 5)));
-        }
-        $this->step('raspakivanje', 'ok', 'Paket raspakovan u ' . AppFiles::RELEASES_DIR . '/' . $r->version . '/ i proveren fajl po fajl.');
-        return $dest;
+        $sig = $this->download((string) $r->sigUrl);
+        // SHA-256 i potpis se proveravaju nad bajtovima pročitanim sa diska neposredno pre raspakivanja (ne nad kopijom u memoriji).
+        return $this->stageVerified($zipFile, $expected, $sig, false, $userId, $ip, $r->version);
     }
 
     private function download(string $url): string
@@ -408,10 +519,13 @@ class Updater
         return $res['body'];
     }
 
-    /** Posle zamene: korisnikov .htaccess u korenu se ne dira; ako ga nema, postavlja se iz paketa. storage/.htaccess mora da postoji. */
+    /**
+     * Posle zamene: korisnikov .htaccess u korenu se ne dira; ako ga nema, postavlja se iz paketa (htaccess.dist).
+     * storage/.htaccess mora da postoji.
+     */
     private function afterSwap(string $sourceDir, string $to): void
     {
-        $new = $sourceDir . '/.htaccess';
+        $new = is_file($sourceDir . '/' . AppFiles::HTACCESS_DIST) ? $sourceDir . '/' . AppFiles::HTACCESS_DIST : $sourceDir . '/.htaccess';
         $cur = $this->root . '/.htaccess';
         if (is_file($new)) {
             if (!is_file($cur)) {
@@ -459,6 +573,7 @@ class Updater
         if ($sourceDir !== null && is_dir($sourceDir)) {
             try {
                 AppFiles::removeTree($sourceDir);
+                AppFiles::removeEmptyStaging($this->root);
             } catch (\Throwable) {
             }
         }
@@ -476,19 +591,42 @@ class Updater
                 }
             }
         }
-        $releases = $this->root . '/' . AppFiles::RELEASES_DIR;
-        if (is_dir($releases) && count(scandir($releases) ?: []) <= 2) {
-            @rmdir($releases);
-        }
+        AppFiles::removeEmptyStaging($this->root);
         $stub = (new Installer($this->root))->removeStub();
         if ($stub !== null) {
             $this->step('ciscenje', 'ok', 'Obrisan install fajl ' . $stub . '.');
         }
-        @unlink($this->storage . '/tmp/manual-update.json');
+        self::clearManualUpdate($this->storage, $this->root);
         try {
             $this->backups()->prune();
         } catch (\Throwable) {
         }
+    }
+
+    /**
+     * Briše paket ručnog ažuriranja koji čeka potvrdu (storage/tmp/manual-update*, releases/<v>/ iz install fajla).
+     */
+    public static function clearManualUpdate(string $storage, string $root): void
+    {
+        $json = $storage . '/tmp/manual-update.json';
+        $data = is_file($json) ? json_decode((string) file_get_contents($json), true) : null;
+        if (is_array($data) && isset($data['version']) && ReleaseChecker::versionFromTag((string) $data['version']) !== null) {
+            $dir = $root . '/' . AppFiles::RELEASES_DIR . '/' . $data['version'];
+            if (is_dir($dir)) {
+                try {
+                    AppFiles::removeTree($dir);
+                } catch (\Throwable) {
+                }
+            }
+        }
+        @unlink($json);
+        if (is_dir($storage . '/tmp/manual-update')) {
+            try {
+                AppFiles::removeTree($storage . '/tmp/manual-update');
+            } catch (\Throwable) {
+            }
+        }
+        AppFiles::removeEmptyStaging($root);
     }
 
     /** @param list<string> $before */

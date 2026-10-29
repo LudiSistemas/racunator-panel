@@ -59,6 +59,7 @@ final class ChecksTest extends InstallTestCase
         $r = $this->check($p);
         $this->assertSame(Checks::WARN, $r['ext_zip']['status']);
         $this->assertSame(Checks::WARN, $r['ext_sodium']['status']);
+        $this->assertStringContainsString('isključeno', $r['ext_sodium']['message'], 'bez sodium-a nema mrežnog ažuriranja');
         $this->assertSame(Checks::WARN, $r['http']['status']);
         $this->assertSame(Checks::WARN, Checks::overall(array_values($r)));
     }
@@ -117,6 +118,51 @@ final class ChecksTest extends InstallTestCase
         $this->assertSame(512 * 1024, Checks::bytes('512k'));
         $this->assertSame(-1, Checks::bytes('-1'));
         $this->assertSame(1000, Checks::bytes('1000'));
+    }
+
+    public function testStorageDostupanPrekoVebaJeCrven(): void
+    {
+        mkdir($this->tmp . '/storage/backups', 0755, true);
+        $p = new FakeProbe();
+        $r = $this->check($p);
+        $this->assertSame(Checks::OK, $r['storage_web']['status']);
+        $call = $p->exposedCalls[0];
+        $this->assertSame('https://primer.rs/panel/storage', $call['url']);
+        $this->assertSame($this->tmp . '/storage', $call['dir']);
+        $this->assertMatchesRegularExpression('/\.txt$/', $call['names'][0]);
+        $this->assertMatchesRegularExpression('#^backups/.*\.zip$#', $call['names'][1]);
+        $this->assertMatchesRegularExpression('/\.sql$/', $call['names'][2]);
+
+        $p->exposed = ['proba.txt', 'proba.zip'];
+        $r = $this->check($p);
+        $this->assertSame(Checks::FAIL, $r['storage_web']['status']);
+        $this->assertStringContainsString('van web root-a', $r['storage_web']['hint']);
+        $this->assertSame(Checks::FAIL, Checks::overall(array_values($r)));
+
+        $p->exposed = null;
+        $this->assertSame(Checks::WARN, $this->check($p)['storage_web']['status']);
+    }
+
+    public function testStorageVanWebRootaSeNeProbaPrekoVeba(): void
+    {
+        $p = new FakeProbe();
+        $p->exposed = ['proba.txt'];
+        $out = [];
+        foreach ((new Checks($this->tmp . '/panel', 'https://primer.rs/panel/install', true, $p, $this->tmp . '/podaci'))->run() as $item) {
+            $out[$item['key']] = $item;
+        }
+        $this->assertSame(Checks::OK, $out['storage_web']['status']);
+        $this->assertSame([], $p->exposedCalls);
+    }
+
+    public function testPraviProbniFajloviSeBrisu(): void
+    {
+        mkdir($this->tmp . '/s/backups', 0755, true);
+        // Adresa na koju niko ne odgovara: poziv nije moguć (null), a probni fajlovi ne ostaju.
+        $res = (new SystemProbe())->webExposed($this->tmp . '/s', 'http://127.0.0.1:9/storage', ['a.txt', 'backups/b.zip']);
+        $this->assertNull($res);
+        $this->assertFileDoesNotExist($this->tmp . '/s/a.txt');
+        $this->assertFileDoesNotExist($this->tmp . '/s/backups/b.zip');
     }
 
     public function testPraviModRewriteTestBezAdreseNijeMoguc(): void

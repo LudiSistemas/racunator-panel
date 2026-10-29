@@ -32,6 +32,7 @@ final class UpdateControllerTest extends InstallTestCase
             'assets' => [
                 ['name' => 'racunator-panel-9.9.0.zip', 'browser_download_url' => $this->zipUrl, 'size' => 1000],
                 ['name' => 'SHA256SUMS', 'browser_download_url' => $base . 'SHA256SUMS', 'size' => 100],
+                ['name' => 'racunator-panel-9.9.0.zip.sig', 'browser_download_url' => $this->zipUrl . '.sig', 'size' => 89],
             ],
         ])], $this->zipUrl => ['status' => 404, 'body' => '']]);
         $updater = new TestUpdater($i['root'], $i['pdo'], $this->app->settings, $this->app->audit, $this->http, 'https://knjige.rs/panel', $i['root'] . '/storage');

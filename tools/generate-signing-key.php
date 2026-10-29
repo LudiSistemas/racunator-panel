@@ -5,7 +5,8 @@ declare(strict_types=1);
  * Pravi nov Ed25519 par ključeva za potpisivanje izdanja i ispisuje uputstvo.
  *   php tools/generate-signing-key.php                 — ispisuje oba ključa na ekran
  *   php tools/generate-signing-key.php --out <putanja> — privatni ključ (base64) upisuje u fajl (0600), na ekran samo javni
- * Privatni ključ NIKAD ne ide u repo — samo u GitHub secret RELEASE_SIGNING_KEY i u menadžer lozinki održavaoca.
+ * Privatni ključ NIKAD ne ide u repo — samo u GitHub secret RELEASE_SIGNING_KEY environment-a „release" i u menadžer
+ * lozinki održavaoca.
  */
 
 if (!function_exists('sodium_crypto_sign_keypair')) {
@@ -68,9 +69,9 @@ PRIVATNI ključ je upisan u: $out (prava 0600; na ekranu se ne prikazuje)
 
 Uputstvo:
   1. U src/Services/ReleaseChecker.php zamenite vrednost konstante PUBLIC_KEY javnim ključem iznad.
-  2. Privatni ključ postavite kao GitHub secret RELEASE_SIGNING_KEY, npr.:
-       gh secret set RELEASE_SIGNING_KEY < $out
-     (ili repo → Settings → Secrets and variables → Actions → New repository secret).
+  2. Privatni ključ postavite kao secret RELEASE_SIGNING_KEY environment-a „release" (sa obaveznim odobrenjem), npr.:
+       gh secret set RELEASE_SIGNING_KEY --env release < $out
+     (ili repo → Settings → Environments → release → Environment secrets; vidi docs/izdavanje.md).
   3. Sačuvajte privatni ključ u menadžeru lozinki, pa obrišite fajl $out (bez tog ključa nova izdanja
      ne mogu da se potpišu ključem koji postojeće instalacije prepoznaju).
 
@@ -89,8 +90,8 @@ PRIVATNI ključ (TAJNA — ne komitovati, ne slati e-poštom):
 
 Uputstvo:
   1. U src/Services/ReleaseChecker.php zamenite vrednost konstante PUBLIC_KEY javnim ključem iznad.
-  2. Na GitHub-u: repo → Settings → Secrets and variables → Actions → New repository secret,
-     ime RELEASE_SIGNING_KEY, vrednost = privatni ključ iznad.
+  2. Na GitHub-u: repo → Settings → Environments → release → Environment secrets → Add secret,
+     ime RELEASE_SIGNING_KEY, vrednost = privatni ključ iznad (vidi docs/izdavanje.md).
   3. Privatni ključ sačuvajte i u menadžeru lozinki (bez njega nova izdanja ne mogu da se potpišu
      ključem koji postojeće instalacije prepoznaju).
   4. Obrišite ovaj ispis iz terminala (npr. `clear`) i istorije.

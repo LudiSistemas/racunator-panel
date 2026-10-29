@@ -57,7 +57,7 @@ final class UpdateController extends BaseController
             'problems' => $updater->preflight($available?->zipSize, true),
             'stuckMaintenance' => $this->stuckMaintenance(),
             'manualPackage' => $this->manualPackage(),
-            'signatureCheck' => function_exists('sodium_crypto_sign_verify_detached') && ReleaseChecker::publicKeyConfigured(),
+            'signatureCheck' => $updater->canVerifySignatures(),
         ]);
     }
 
@@ -93,7 +93,7 @@ final class UpdateController extends BaseController
             'current' => $this->currentVersion(),
             'release' => $release,
             'problems' => $this->updater()->preflight($release->zipSize, true),
-            'signatureCheck' => function_exists('sodium_crypto_sign_verify_detached') && ReleaseChecker::publicKeyConfigured(),
+            'signatureCheck' => $this->updater()->canVerifySignatures(),
         ]);
     }
 
@@ -222,6 +222,8 @@ final class UpdateController extends BaseController
             $this->http ?? new NativeHttpClient(180),
             $this->app->config->publicUrl(),
             $this->app->config->storagePath(),
+            null,
+            (string) $this->app->config->get('app_key', ''),
         );
     }
 

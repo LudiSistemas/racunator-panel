@@ -83,4 +83,66 @@ final class AppFilesTest extends InstallTestCase
         unlink($dir . '/MANIFEST.sha256');
         $this->assertNotSame([], AppFiles::verifyManifest($dir));
     }
+
+    public function testManifestOdbijaFajloveKojihNemaUManifestu(): void
+    {
+        $dir = $this->tmp . '/pkg';
+        $this->makeApp($dir, '1.0.0');
+        $this->writeManifest($dir);
+        file_put_contents($dir . '/public/visak.php', '<?php');
+        mkdir($dir . '/src/novi');
+        file_put_contents($dir . '/src/novi/.htaccess', 'Require all granted');
+        symlink('/etc/passwd', $dir . '/docs/link');
+        $errors = AppFiles::verifyManifest($dir);
+        $this->assertContains('Fajl nije u manifestu: public/visak.php', $errors);
+        $this->assertContains('Fajl nije u manifestu: src/novi/.htaccess', $errors);
+        $this->assertContains('Fajl nije u manifestu: docs/link', $errors);
+        $this->assertCount(3, $errors);
+    }
+
+    public function testReleasesIOldSuZabranjeniPrekoVeba(): void
+    {
+        $root = $this->tmp . '/root';
+        mkdir($root);
+        $dir = AppFiles::stagingDir($root, '2.0.0');
+        $this->assertSame($root . '/releases/2.0.0', $dir);
+        $ht = (string) file_get_contents($root . '/releases/.htaccess');
+        $this->assertStringContainsString('Require all denied', $ht);
+        $this->assertStringContainsString('<If "true">', $ht, 'zabrana važi i kad poddirektorijum ima „Require all granted"');
+        $this->assertStringNotContainsString('RewriteEngine', $ht);
+        mkdir($dir);
+        file_put_contents($dir . '/.htaccess', "RewriteEngine On\n");
+        file_put_contents($dir . '/config.php', '<?php return [];');
+        AppFiles::neutralizeStaging($dir);
+        $this->assertFileDoesNotExist($dir . '/.htaccess');
+        $this->assertFileExists($dir . '/htaccess.dist');
+        $this->assertFileDoesNotExist($dir . '/config.php');
+        AppFiles::removeTree($dir);
+        AppFiles::removeEmptyStaging($root);
+        $this->assertDirectoryDoesNotExist($root . '/releases');
+        foreach (['', '.', '..', 'a/b'] as $bad) {
+            try {
+                AppFiles::stagingDir($root, $bad);
+                $this->fail('Prihvaćeno ime ' . $bad);
+            } catch (\RuntimeException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testAtomicanUpisSaPravima0600(): void
+    {
+        $old = umask(0022);
+        try {
+            AppFiles::writeAtomic($this->tmp . '/tajna.php', '<?php return [];', 0600);
+            $fp = AppFiles::openPrivate($this->tmp . '/kopija.sql');
+            fclose($fp);
+        } finally {
+            umask($old);
+        }
+        $this->assertSame('0600', substr(sprintf('%o', fileperms($this->tmp . '/tajna.php')), -4));
+        $this->assertSame('0600', substr(sprintf('%o', fileperms($this->tmp . '/kopija.sql')), -4));
+        $this->assertSame(0022, umask(), 'umask se vraća');
+        $this->assertSame([], glob($this->tmp . '/tajna.php.tmp-*') ?: []);
+    }
 }

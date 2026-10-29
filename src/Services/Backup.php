@@ -4,9 +4,12 @@ declare(strict_types=1);
 namespace RacunatorPanel\Services;
 
 /**
- * Rezervne kopije instalacije u `storage/backups/<YYYYmmdd-HHMMSS>/`:
+ * Rezervne kopije instalacije u `storage/backups/<YYYYmmdd-HHMMSS>-<n>-<nasumično>/` (nasumičan sufiks: ime kopije ne
+ * može da se pogodi, pa ni preuzme preko veba ako zaštita storage/ na hostingu zakaže):
  *   fajlovi.zip   — fajlovi instalacije bez storage/, releases/ i _old/ (uključuje config.php; on se pri povratku ne dira)
- *   baza.sql      — MySQL/MariaDB: SQL skripta (DROP + CREATE + INSERT po tabelama), napravljena kroz PDO
+ *   baza.sql      — MySQL/MariaDB: SQL skripta (DROP + CREATE + INSERT po tabelama), napravljena kroz PDO; tekstualne
+ *                   vrednosti su heks literali (_utf8mb4 X'…'), pa skripta ne zavisi od sql_mode (NO_BACKSLASH_ESCAPES)
+ *                   i nijedna vrednost nema prelom reda
  *   baza.sqlite   — SQLite: kopija baze (VACUUM INTO, ili kopija fajla)
  *   podaci.json   — verzija, vreme, drajver, tabele, veličine
  * Čuvaju se poslednje tri (prune). Kopije sadrže heševe lozinki i podatke korisnika — storage/ je zaštićen .htaccess-om,
@@ -40,10 +43,17 @@ final class Backup
         return $this->storage . '/backups';
     }
 
-    /** Ime kopije je bezbedno za putanju (sprečava `../`). */
+    /** Ime kopije je bezbedno za putanju (sprečava `../`). Stari oblik bez nasumičnog sufiksa i dalje važi. */
     public static function validName(string $name): bool
     {
-        return preg_match('/^\d{8}-\d{6}(-\d+)?$/', $name) === 1;
+        return preg_match('/^\d{8}-\d{6}(-\d{1,4})?(-[0-9a-f]{16})?$/', $name) === 1;
+    }
+
+    /** Ključ za redosled: [vreme, redni broj u istoj sekundi]. @return array{0:string,1:int} */
+    private static function sortKey(string $name): array
+    {
+        preg_match('/^(\d{8}-\d{6})(?:-(\d{1,4}))?(?:-[0-9a-f]{16})?$/', $name, $m);
+        return [(string) ($m[1] ?? $name), (int) ($m[2] ?? 0)];
     }
 
     /**
@@ -53,17 +63,16 @@ final class Backup
     public function create(string $version, string $reason = 'azuriranje'): array
     {
         AppFiles::ensureDir($this->dir(), 0700);
-        // Više kopija u istoj sekundi: sufiks veći od svih postojećih (i obrisanih najstarijih), da redosled ostane tačan.
+        // Više kopija u istoj sekundi: redni broj veći od svih postojećih, da redosled ostane tačan; nasumičan sufiks
+        // sprečava da se ime pogodi.
         $base = gmdate('Ymd-His');
         $max = 0;
         foreach (scandir($this->dir()) ?: [] as $entry) {
-            if ($entry === $base) {
-                $max = max($max, 1);
-            } elseif (preg_match('/^' . preg_quote($base, '/') . '-(\d+)$/', $entry, $m)) {
-                $max = max($max, (int) $m[1]);
+            if (self::validName($entry) && str_starts_with($entry, $base)) {
+                $max = max($max, self::sortKey($entry)[1]);
             }
         }
-        $name = $max === 0 ? $base : $base . '-' . ($max + 1);
+        $name = $base . '-' . ($max + 1) . '-' . bin2hex(random_bytes(8));
         $dir = $this->dir() . '/' . $name;
         AppFiles::ensureDir($dir, 0700);
         try {
@@ -79,7 +88,8 @@ final class Backup
                 'reason' => $reason,
                 'size' => AppFiles::treeSize($dir),
             ];
-            file_put_contents($dir . '/' . self::META, json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            AppFiles::writeAtomic($dir . '/' . self::META, (string) json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0600);
+            @chmod($dir . '/' . self::FILES_ZIP, 0600);
         } catch (\Throwable $e) {
             AppFiles::removeTree($dir);
             throw new \RuntimeException('Rezervna kopija nije napravljena: ' . $e->getMessage(), 0, $e);
@@ -97,7 +107,7 @@ final class Backup
                 $out[] = $meta;
             }
         }
-        usort($out, static fn (array $a, array $b): int => strnatcmp($b['name'], $a['name']));
+        usort($out, static fn (array $a, array $b): int => self::sortKey($b['name']) <=> self::sortKey($a['name']));
         return $out;
     }
 
@@ -155,15 +165,14 @@ final class Backup
         if (!is_file($zip)) {
             throw new \RuntimeException('Kopija nema fajlove (' . self::FILES_ZIP . ').');
         }
-        $src = $this->root . '/' . AppFiles::RELEASES_DIR . '/vracanje-' . $name;
-        if (file_exists($src)) {
-            AppFiles::removeTree($src);
-        }
-        AppFiles::extractZip($zip, $src);
+        $src = AppFiles::stagingDir($this->root, 'vracanje-' . $name);
         try {
+            AppFiles::extractZip($zip, $src);
+            AppFiles::neutralizeStaging($src);
             AppFiles::swapIn($this->root, $src);
         } finally {
             AppFiles::removeTree($src);
+            AppFiles::removeEmptyStaging($this->root);
         }
     }
 
@@ -322,11 +331,7 @@ final class Backup
         $pdo = $this->pdo;
         $all = self::listTables($pdo);
         $tables = $this->tables === null ? $all : array_values(array_intersect($all, $this->tables));
-        $fp = fopen($target, 'wb');
-        if ($fp === false) {
-            throw new \RuntimeException('Ne mogu da otvorim ' . $target);
-        }
-        @chmod($target, 0600);
+        $fp = AppFiles::openPrivate($target, 'wb');
         try {
             self::write($fp, "-- Računator panel — rezervna kopija baze (" . gmdate('Y-m-d H:i:s') . " UTC)\n"
                 . "SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS=0;\nSET UNIQUE_CHECKS=0;\n");
@@ -357,12 +362,7 @@ final class Backup
                 $cols ??= '(' . implode(', ', array_map([self::class, 'qm'], array_keys($row))) . ')';
                 $vals = [];
                 foreach ($row as $v) {
-                    $vals[] = match (true) {
-                        $v === null => 'NULL',
-                        is_int($v), is_float($v) => (string) $v,
-                        is_bool($v) => $v ? '1' : '0',
-                        default => $pdo->quote((string) $v),
-                    };
+                    $vals[] = self::sqlValue($v);
                 }
                 $batch[] = '(' . implode(', ', $vals) . ')';
                 if (count($batch) >= 100) {
@@ -380,8 +380,8 @@ final class Backup
     }
 
     /**
-     * Izvršava SQL skriptu koju je napravio dumpMysql: naredba se završava znakom `;` na kraju reda (vrednosti su
-     * escape-ovane, pa nemaju sirove prelome reda; CREATE TABLE ima više redova i završava se `;`).
+     * Izvršava SQL skriptu koju je napravio dumpMysql: naredba se završava znakom `;` na kraju reda (tekstualne vrednosti
+     * su heks literali, pa nemaju prelome reda ni „;"; CREATE TABLE ima više redova i završava se `;`).
      * @param list<string> $dropAlso
      */
     private function restoreMysql(string $file, array $dropAlso): void
@@ -419,6 +419,33 @@ final class Backup
             } catch (\Throwable) {
             }
         }
+    }
+
+    /**
+     * Vrednost za INSERT u skripti: brojevi kao takvi, tekst kao heks literal sa skupom znakova (_utf8mb4 X'…', a
+     * _binary za bajtove koji nisu UTF-8). Heks ne zavisi od sql_mode (NO_BACKSLASH_ESCAPES) i nema prelome reda ni
+     * znak „;", pa skripta može da se čita red po red. Introduktor čini vrednost tekstom (ne brojem) i u numeričkom
+     * kontekstu.
+     */
+    public static function sqlValue(mixed $v): string
+    {
+        if ($v === null) {
+            return 'NULL';
+        }
+        if (is_bool($v)) {
+            return $v ? '1' : '0';
+        }
+        if (is_int($v) || (is_float($v) && is_finite($v))) {
+            return (string) $v;
+        }
+        $s = (string) $v;
+        if ($s === '') {
+            return "''";
+        }
+        if (preg_match('/^-?\d{1,20}(\.\d{1,30})?$/', $s) === 1) {
+            return "'" . $s . "'";
+        }
+        return (mb_check_encoding($s, 'UTF-8') ? '_utf8mb4' : '_binary') . " X'" . bin2hex($s) . "'";
     }
 
     /** @param resource $fp */

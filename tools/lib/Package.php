@@ -5,15 +5,19 @@ namespace RacunatorPanel\Tools;
 
 /**
  * Pravljenje paketa izdanja (koriste ga tools/build-installer.php, tools/build-release.php i testovi).
- *   ZIP:  public/, src/, install/, docs/, LICENSE, README.md, CHANGELOG.md, .htaccess, storage/.htaccess + MANIFEST.sha256
- *   Stub: tools/stub/installer-stub.php + base64 ZIP posle __halt_compiler()
+ *   ZIP:  public/, src/, install/, docs/, LICENSE, README.md, CHANGELOG.md, htaccess.dist, storage/.htaccess + MANIFEST.sha256
+ *   Stub: tools/stub/installer-stub.php + base64 ZIP posle __halt_compiler() (+ Ed25519 potpis ZIP-a, ako postoji)
  * Isti ZIP je i paket za ažuriranje iz panela (racunator-panel-<verzija>.zip).
+ * Koreni .htaccess ide u paket kao htaccess.dist: na mesto .htaccess ga stavlja tek install fajl (nova instalacija) ili
+ * ažuriranje (kad korisnik nema svoj). Tako raspakovan paket u releases/<verzija>/ nema aktivna rewrite pravila.
  */
 final class Package
 {
     public const DIRS = ['public', 'src', 'install', 'docs'];
-    public const FILES = ['LICENSE', 'README.md', 'CHANGELOG.md', '.htaccess', 'storage/.htaccess'];
+    public const FILES = ['LICENSE', 'README.md', 'CHANGELOG.md', 'htaccess.dist', 'storage/.htaccess'];
     public const INSTALLER_NAME = 'racunator-panel-install.php';
+    /** Fajl u paketu => izvor u repou (kad se razlikuju). */
+    private const SOURCES = ['htaccess.dist' => '.htaccess', 'storage/.htaccess' => 'install/templates/storage.htaccess'];
 
     public static function version(string $root): string
     {
@@ -46,10 +50,10 @@ final class Package
             }
         }
         foreach (self::FILES as $f) {
-            if (is_file($root . '/' . $f)) {
+            if ($f !== 'htaccess.dist' && is_file($root . '/' . $f)) {
                 $out[] = $f;
-            } elseif ($f === 'storage/.htaccess' && is_file($root . '/install/templates/storage.htaccess')) {
-                $out[] = $f; // pravi se iz šablona (vidi contents())
+            } elseif (isset(self::SOURCES[$f]) && is_file($root . '/' . self::SOURCES[$f])) {
+                $out[] = $f; // pravi se iz drugog fajla repoa (vidi contents())
             } else {
                 throw new \RuntimeException('Nedostaje fajl ' . $f);
             }
@@ -74,8 +78,8 @@ final class Package
     private static function contents(string $root, string $rel): string
     {
         $path = $root . '/' . $rel;
-        if ($rel === 'storage/.htaccess' && !is_file($path)) {
-            $path = $root . '/install/templates/storage.htaccess';
+        if (isset(self::SOURCES[$rel]) && ($rel === 'htaccess.dist' || !is_file($path))) {
+            $path = $root . '/' . self::SOURCES[$rel];
         }
         $c = file_get_contents($path);
         if ($c === false) {
@@ -127,8 +131,12 @@ final class Package
         return ['file' => $outZip, 'sha256' => (string) hash_file('sha256', $outZip), 'size' => (int) filesize($outZip), 'count' => count($data)];
     }
 
-    /** Pravi samoraspakujući install fajl od ZIP-a. */
-    public static function buildInstaller(string $root, string $zipFile, string $outPhp): array
+    /**
+     * Pravi samoraspakujući install fajl od ZIP-a. Potpis ZIP-a (sadržaj .sig fajla, base64) se ugrađuje u install fajl,
+     * pa ručno ažuriranje može da ga proveri javnim ključem instalirane verzije; bez potpisa install fajl radi samo za novu
+     * instalaciju (postojeća instalacija ga odbija, osim kad hosting nema sodium — vidi docs/azuriranje.md).
+     */
+    public static function buildInstaller(string $root, string $zipFile, string $outPhp, ?string $signature = null): array
     {
         $version = self::version($root);
         $tpl = (string) file_get_contents($root . '/tools/stub/installer-stub.php');
@@ -136,12 +144,51 @@ final class Package
         if (!str_ends_with(rtrim($tpl), '__halt_compiler();')) {
             throw new \RuntimeException('Šablon stuba mora da se završava sa __halt_compiler();');
         }
-        $stub = strtr(rtrim($tpl), ['@@VERSION@@' => $version, '@@SHA256@@' => hash('sha256', $zip)]);
+        $sig = $signature !== null ? trim($signature) : '';
+        if ($sig !== '' && preg_match('#^[A-Za-z0-9+/]+={0,2}$#', $sig) !== 1) {
+            throw new \RuntimeException('Potpis nije base64.');
+        }
+        $stub = strtr(rtrim($tpl), ['@@VERSION@@' => $version, '@@SHA256@@' => hash('sha256', $zip), '@@SIGNATURE@@' => $sig]);
         $out = $stub . "\n" . chunk_split(base64_encode($zip), 76, "\n");
         if (file_put_contents($outPhp, $out) === false) {
             throw new \RuntimeException('Ne mogu da upišem ' . $outPhp);
         }
-        return ['file' => $outPhp, 'sha256' => (string) hash_file('sha256', $outPhp), 'size' => (int) filesize($outPhp)];
+        return ['file' => $outPhp, 'sha256' => (string) hash_file('sha256', $outPhp), 'size' => (int) filesize($outPhp), 'signed' => $sig !== ''];
+    }
+
+    /**
+     * Ed25519 tajni ključ iz base64 (64 bajta tajnog ključa ili 32 bajta seed-a, kako ga ispisuje generate-signing-key.php).
+     */
+    public static function secretKey(string $b64): string
+    {
+        if (!function_exists('sodium_crypto_sign_detached')) {
+            throw new \RuntimeException('Potpis zahteva PHP ekstenziju sodium.');
+        }
+        $raw = base64_decode(trim($b64), true);
+        if ($raw === false || $raw === '') {
+            throw new \RuntimeException('Privatni ključ nije ispravan base64.');
+        }
+        if (strlen($raw) === SODIUM_CRYPTO_SIGN_SEEDBYTES) {
+            $raw = sodium_crypto_sign_secretkey(sodium_crypto_sign_seed_keypair($raw));
+        }
+        if (strlen($raw) !== SODIUM_CRYPTO_SIGN_SECRETKEYBYTES) {
+            throw new \RuntimeException('Privatni ključ nije Ed25519 ključ (očekuje se 32 ili 64 bajta posle base64).');
+        }
+        return $raw;
+    }
+
+    /** Potpisuje fajl (Ed25519) i upisuje <fajl>.sig (base64 potpisa). Vraća sadržaj potpisa (base64). */
+    public static function signFile(string $file, string $secretKey): string
+    {
+        $data = @file_get_contents($file);
+        if ($data === false) {
+            throw new \RuntimeException('Ne mogu da pročitam ' . $file);
+        }
+        $sig = base64_encode(sodium_crypto_sign_detached($data, $secretKey));
+        if (file_put_contents($file . '.sig', $sig . "\n") === false) {
+            throw new \RuntimeException('Ne mogu da upišem ' . $file . '.sig');
+        }
+        return $sig;
     }
 
     /** SHA256SUMS u formatu `sha256sum` (dva razmaka). @param list<string> $files */

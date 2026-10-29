@@ -16,6 +16,13 @@ final class TestUpdater extends Updater
     /** @var list<string> redom vraćani rezultati probeHealth */
     public array $health = [];
     public bool $flagSeenDuringMigrations = false;
+    /** Simulacija hostinga bez ekstenzije sodium (vratiti na false u tearDown). */
+    public static bool $noSodium = false;
+
+    protected static function sodiumAvailable(): bool
+    {
+        return !self::$noSodium && parent::sodiumAvailable();
+    }
 
     protected function runMigrations(): array
     {

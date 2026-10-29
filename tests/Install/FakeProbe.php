@@ -18,6 +18,10 @@ final class FakeProbe extends SystemProbe
     public bool $writable = true;
     public ?int $free = 1024 * 1024 * 1024;
     public ?bool $rewrite = true;
+    /** @var list<string>|null rezultat webExposed (null = poziv nije moguć) */
+    public ?array $exposed = [];
+    /** @var list<array{dir:string,url:string,names:list<string>}> */
+    public array $exposedCalls = [];
 
     public function phpVersion(): string { return $this->php; }
     public function extensionLoaded(string $name): bool { return $this->ext[$name] ?? false; }
@@ -27,4 +31,9 @@ final class FakeProbe extends SystemProbe
     public function canCreateFile(string $dir): bool { return $this->writable; }
     public function freeSpace(string $path): ?int { return $this->free; }
     public function modRewriteWorks(string $installDir, ?string $installUrl): ?bool { return $this->rewrite; }
+    public function webExposed(string $dir, string $baseUrl, array $names): ?array
+    {
+        $this->exposedCalls[] = ['dir' => $dir, 'url' => $baseUrl, 'names' => $names];
+        return $this->exposed;
+    }
 }

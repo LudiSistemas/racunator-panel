@@ -186,11 +186,101 @@ final class InstallerTest extends InstallTestCase
         $this->assertSame('racunator-panel-install.php', $i->removeStub());
         $this->assertFileDoesNotExist($root . '/racunator-panel-install.php');
 
-        $this->assertTrue($i->tokenMatches(null)); // nema tokena = ručno otpremljeni fajlovi
+        // Bez fajla tokena (ručno otpremljeni fajlovi) čarobnjak NE radi — potreban je dokaz vlasništva.
+        $this->assertFalse($i->tokenMatches(null));
+        $this->assertFalse($i->tokenMatches(hash('sha256', '')));
         file_put_contents($root . '/storage/tmp/install-token', hash('sha256', 'tajna'));
         $this->assertFalse($i->tokenMatches(null));
         $this->assertFalse($i->tokenMatches(hash('sha256', 'pogresno')));
         $this->assertTrue($i->tokenMatches(hash('sha256', 'tajna')));
+    }
+
+    public function testDokazVlasnistvaIzdajeNovKljuc(): void
+    {
+        $root = $this->root();
+        mkdir($root . '/install');
+        $i = new Installer($root);
+        $i->ensureStorage();
+        $nonce = bin2hex(random_bytes(16));
+        $this->assertSame('DOZVOLA-' . $nonce . '.txt', Installer::proofFileName($nonce));
+        $this->assertFalse($i->consumeProof($nonce), 'fajl još ne postoji');
+        file_put_contents($root . '/install/DOZVOLA-' . str_repeat('0', 32) . '.txt', ''); // tuđi niz ne važi
+        $this->assertFalse($i->consumeProof($nonce));
+        touch($i->proofFile($nonce));
+        $this->assertTrue($i->consumeProof($nonce));
+        $this->assertSame([], glob($root . '/install/DOZVOLA-*') ?: [], 'fajlovi za dokaz se brišu');
+        $t1 = $i->issueToken();
+        $this->assertTrue($i->tokenMatches(hash('sha256', $t1)));
+        $this->assertSame('0600', substr(sprintf('%o', fileperms($root . '/storage/tmp/install-token')), -4));
+        $t2 = $i->issueToken();
+        $this->assertFalse($i->tokenMatches(hash('sha256', $t1)), 'nov ključ poništava stari');
+        $this->assertTrue($i->tokenMatches(hash('sha256', $t2)));
+        $this->expectException(\InvalidArgumentException::class);
+        Installer::proofFileName('../../x');
+    }
+
+    public function testKopijaProgramaUReleasesIOldNijeInstalacija(): void
+    {
+        $root = $this->root();
+        mkdir($root . '/install');
+        file_put_contents($root . '/install/Installer.php', '<?php');
+        file_put_contents($root . '/config.php', '<?php return [];');
+        $this->assertNull(Installer::nestedCopyReason($root));
+        $this->assertNotNull(Installer::nestedCopyReason($root . '/releases/1.2.3'));
+        $this->assertNotNull(Installer::nestedCopyReason($root . '/releases/vracanje-20261029-120000'));
+        $this->assertNotNull(Installer::nestedCopyReason($root . '/_old'));
+        mkdir($root . '/podfolder/install', 0755, true);
+        $this->assertNotNull(Installer::nestedCopyReason($root . '/podfolder'), 'folder ispod instalacije panela');
+        // Tuđi CMS sa config.php u roditelju ne smeta.
+        $other = $this->tmp . '/sajt';
+        mkdir($other . '/panel', 0755, true);
+        file_put_contents($other . '/config.php', '<?php');
+        mkdir($other . '/install');
+        $this->assertNull(Installer::nestedCopyReason($other . '/panel'));
+        $this->assertTrue((new Installer($root . '/releases/1.2.3'))->isNestedCopy());
+    }
+
+    public function testFolderZaPodatkeVanWebRoota(): void
+    {
+        $root = $this->root();
+        $i = new Installer($root);
+        $this->assertSame($root . '/storage', $i->normalizeStorage(''));
+        foreach (['relativno/putanja', $root . '/storage/../x', $root . '/podaci'] as $bad) {
+            try {
+                $i->normalizeStorage($bad);
+                $this->fail('Prihvaćen loš folder: ' . $bad);
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+        try {
+            $i->normalizeStorage($this->tmp . '/web/podaci', $this->tmp . '/web');
+            $this->fail('Folder u web root-u je prihvaćen.');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertStringContainsString('web root', $e->getMessage());
+        }
+        $ext = $i->normalizeStorage($this->tmp . '/van-weba/podaci', $root);
+        $this->assertSame(realpath($this->tmp . '/van-weba/podaci'), $ext);
+
+        $res = $i->install($this->input($i, ['db' => $i->dbConfig(['driver' => 'sqlite'], $ext), 'storage' => $ext]));
+        $cfg = require $root . '/config.php';
+        $this->assertSame($ext, $cfg['storage']);
+        $this->assertSame('sqlite:' . $ext . '/panel.sqlite', $cfg['db']['dsn']);
+        $this->assertFileExists($ext . '/panel.sqlite');
+        $this->assertDirectoryExists($ext . '/backups');
+        $this->assertSame($ext, $i->storage(), 'posle instalacije storage() čita config.php');
+        $this->assertSame('1.2.3', $res['version']);
+    }
+
+    public function testProveraHealthSaljeToken(): void
+    {
+        $http = new FakeHttpClient(['https://knjige.rs/panel/health' => ['status' => 200, 'body' => '{"ok":true,"version":"1.2.3"}']]);
+        $res = Installer::checkHealth($http, 'https://knjige.rs/panel', 'kljuc');
+        $this->assertTrue($res['ok']);
+        $this->assertStringContainsString('1.2.3', $res['message']);
+        $this->assertSame(\RacunatorPanel\App::healthToken('kljuc'), $http->calls[0]['headers'][\RacunatorPanel\App::HEALTH_TOKEN_HEADER]);
+        $http->routes['https://knjige.rs/panel/health'] = ['status' => 200, 'body' => '{"ok":true}'];
+        $this->assertTrue(Installer::checkHealth($http, 'https://knjige.rs/panel')['ok'], 'bez verzije je i dalje ispravno');
     }
 
     public function testObjasnjenjeGresakaBaze(): void

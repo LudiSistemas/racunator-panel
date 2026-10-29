@@ -1,23 +1,17 @@
 # install/: dostupni su samo čarobnjak (index.php) i njegov CSS/JS. Klase instalera se ne izvršavaju direktno.
+# Namerno NEMA „Require all granted": dozvola dolazi od roditelja, pa zabrana iz releases/.htaccess i _old/.htaccess
+# (kopije programa koje čekaju zamenu ili su prethodna verzija) važi i za čarobnjak u njima.
 Options -Indexes
 DirectoryIndex index.php
 
-<FilesMatch "\.php$">
+# Zabrani sve .php osim index.php; zabrani i fajlove za dokaz vlasništva (DOZVOLA-*.txt) i probne fajlove.
+<FilesMatch "^(?!index\.php$).*\.(php\d?|phtml|phar)$|^DOZVOLA-|^\.proba-">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>
     <IfModule !mod_authz_core.c>
         Order allow,deny
         Deny from all
-    </IfModule>
-</FilesMatch>
-<FilesMatch "^index\.php$">
-    <IfModule mod_authz_core.c>
-        Require all granted
-    </IfModule>
-    <IfModule !mod_authz_core.c>
-        Order allow,deny
-        Allow from all
     </IfModule>
 </FilesMatch>
 

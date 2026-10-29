@@ -16,10 +16,12 @@ final class ReleaseChecker
     public const API = 'https://api.github.com/repos/' . self::REPO . '/releases/latest';
     /** Dozvoljeni početak adrese paketa (sprečava preuzimanje sa tuđe adrese i kad bi neko podmetnuo odgovor API-ja). */
     public const DOWNLOAD_PREFIX = 'https://github.com/' . self::REPO . '/releases/download/';
+    /** Hostovi sa kojih se preuzimaju fajlovi izdanja (github.com preusmerava na CDN za fajlove). */
+    public const DOWNLOAD_HOSTS = ['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com'];
 
     /**
      * Javni Ed25519 ključ za proveru potpisa paketa (base64, 32 bajta). Pravi par: `php tools/generate-signing-key.php`.
-     * Dok je ovde PLACEHOLDER, potpis se ne može proveriti i ažuriranje radi samo uz SHA-256 i upozorenje u dnevniku.
+     * Bez ispravnog ključa (ili bez ekstenzije sodium) ažuriranje preko mreže je isključeno.
      */
     public const PUBLIC_KEY = 'gsy5vNw/tHlWrGRbnlfJzLqAW4okmmoDjU2um5jgkQc=';
 
@@ -48,6 +50,37 @@ final class ReleaseChecker
     public static function isNewer(string $candidate, string $current): bool
     {
         return version_compare($candidate, $current, '>');
+    }
+
+    /**
+     * Adresa fajla izdanja je zvanična: samo https, host sa liste, bez korisnika/lozinke/porta/upita/fragmenta, bez „..",
+     * kodiranih tačaka i kosih crta; na github.com putanja mora biti /<REPO>/releases/download/<tag>/<fajl>.
+     */
+    public static function isOfficialDownloadUrl(string $url): bool
+    {
+        if ($url === '' || preg_match('/[\x00-\x20\x7F\\\\]/', $url) === 1 || preg_match('/%(2e|2f|5c|00)/i', $url) === 1) {
+            return false;
+        }
+        $p = parse_url($url);
+        if (!is_array($p) || strtolower((string) ($p['scheme'] ?? '')) !== 'https' || !isset($p['host'], $p['path'])
+            || isset($p['user']) || isset($p['pass']) || isset($p['port']) || isset($p['query']) || isset($p['fragment'])) {
+            return false;
+        }
+        $host = strtolower($p['host']);
+        if (!in_array($host, self::DOWNLOAD_HOSTS, true)) {
+            return false;
+        }
+        $path = $p['path'];
+        foreach (explode('/', $path) as $seg) {
+            if ($seg === '.' || $seg === '..') {
+                return false;
+            }
+        }
+        if ($host === 'github.com') {
+            $prefix = '/' . self::REPO . '/releases/download/';
+            return str_starts_with($path, $prefix) && preg_match('#^[^/]+/[^/]+$#', substr($path, strlen($prefix))) === 1;
+        }
+        return true;
     }
 
     /** Javni ključ (podrazumevano PUBLIC_KEY) je ispravan base64 od 32 bajta, a ne placeholder. */
