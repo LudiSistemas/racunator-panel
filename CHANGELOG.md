@@ -1,6 +1,6 @@
 # Izmene
 
-## Neobjavljeno
+## 0.4.0 — 2026-10-29
 
 ### Uslovi korišćenja
 - Čarobnjak za instalaciju ima nov korak **Uslovi korišćenja** (pre prvog naloga): kratak sažetak, link na
