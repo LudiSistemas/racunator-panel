@@ -11,6 +11,7 @@ use RacunatorPanel\Controllers\Panel\DashboardController;
 use RacunatorPanel\Controllers\Panel\PanelServices;
 use RacunatorPanel\Controllers\Panel\ReceiptsController;
 use RacunatorPanel\Controllers\Panel\SettingsController;
+use RacunatorPanel\Controllers\Panel\TermsController;
 use RacunatorPanel\Controllers\Panel\UsersController;
 
 /** Rute ekrana knjigovođe. Redosled je bitan: `/korisnici/novi` mora biti pre `/korisnici/{id}`. */
@@ -26,6 +27,10 @@ final class PanelRoutes
         $r->get('/prijava', $auth->showLogin(...));
         $r->post('/prijava', $auth->login(...));
         $r->post('/odjava', $auth->logout(...));
+
+        $terms = new TermsController($app, $services);
+        $r->get('/uslovi', $terms->show(...));
+        $r->post('/uslovi', $terms->accept(...));
 
         $dashboard = new DashboardController($app, $services);
         $r->get('/', $dashboard->index(...));

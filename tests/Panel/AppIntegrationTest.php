@@ -32,6 +32,7 @@ final class AppIntegrationTest extends TestCase
         $this->app = App::create(dirname(__DIR__, 2), $this->config, $this->pdo, $this->session);
         $this->app->users->create('admin', (new PasswordHasher())->hash(self::PASSWORD), 'admin', null);
         $this->app->settings->set('accountant_name', 'Knjigovodstvo XY');
+        $this->app->settings->set(\RacunatorPanel\Services\Terms::SETTING_VERSION, (string) \RacunatorPanel\Services\Terms::VERSION);
     }
 
     protected function tearDown(): void
@@ -125,5 +126,44 @@ final class AppIntegrationTest extends TestCase
         $logout = $this->request('POST', '/odjava');
         self::assertSame('/panel/prijava', $logout->headers['Location']);
         self::assertSame('/panel/prijava', $this->request('GET', '/korisnici')->headers['Location'] ?? null);
+    }
+
+    /** Ažuriranje na verziju sa novim uslovima: posle prijave administrator mora da prihvati uslove (i za Ažuriranje). */
+    public function testAdminPoslePrijaveMoraDaPrihvatiNoveUslove(): void
+    {
+        $this->app->settings->set(\RacunatorPanel\Services\Terms::SETTING_VERSION, (string) (\RacunatorPanel\Services\Terms::VERSION - 1));
+        $this->app->users->create('radnik', (new PasswordHasher())->hash(self::PASSWORD), 'zaposleni', null);
+
+        $ok = $this->request('POST', '/prijava', ['korisnicko_ime' => 'admin', 'lozinka' => self::PASSWORD]);
+        self::assertSame('/panel/', $ok->headers['Location']);
+        foreach (['/', '/azuriranje', '/podesavanja/api'] as $path) {
+            $res = $this->request('GET', $path);
+            self::assertSame(303, $res->status, $path);
+            self::assertSame('/panel/uslovi', $res->headers['Location'] ?? null, $path);
+        }
+        $page = $this->request('GET', '/uslovi');
+        self::assertSame(200, $page->status);
+        self::assertStringContainsString('name="prihvatam_uslove"', $page->body);
+        self::assertSame(422, $this->request('POST', '/uslovi')->status);
+        $accepted = $this->request('POST', '/uslovi', ['prihvatam_uslove' => 'da']);
+        self::assertSame('/panel/', $accepted->headers['Location'] ?? null);
+        self::assertSame(200, $this->request('GET', '/')->status);
+        self::assertSame(200, $this->request('GET', '/azuriranje')->status);
+        self::assertSame((string) \RacunatorPanel\Services\Terms::VERSION, $this->app->settings->get('terms_accepted_version'));
+        self::assertNotNull($this->app->settings->get('terms_accepted_at'));
+        self::assertContains('terms.accept', array_column($this->app->audit->recent(10), 'action'));
+        $this->request('POST', '/odjava');
+    }
+
+    public function testZaposleniNijeBlokiranUslovima(): void
+    {
+        $this->app->settings->set(\RacunatorPanel\Services\Terms::SETTING_VERSION, '0');
+        $this->app->users->create('radnik', (new PasswordHasher())->hash(self::PASSWORD), 'zaposleni', null);
+        $ok = $this->request('POST', '/prijava', ['korisnicko_ime' => 'radnik', 'lozinka' => self::PASSWORD]);
+        self::assertSame('/panel/', $ok->headers['Location']);
+        self::assertSame(200, $this->request('GET', '/')->status);
+        self::assertSame(200, $this->request('GET', '/korisnici')->status);
+        self::assertSame(403, $this->request('POST', '/uslovi', ['prihvatam_uslove' => 'da'])->status);
+        self::assertSame('0', $this->app->settings->get('terms_accepted_version'));
     }
 }

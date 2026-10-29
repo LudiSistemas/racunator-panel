@@ -64,7 +64,7 @@ $items = [
   <?= $content ?? '' ?>
 </main>
 <footer class="footer no-print">
-  Računator panel<?= $currentUser !== null && isset($version) && $version !== '' ? ' · verzija ' . e($version) : '' ?><?= !empty($accountantName) ? ' · ' . e($accountantName) : '' ?>
+  Računator panel<?= $currentUser !== null && isset($version) && $version !== '' ? ' · verzija ' . e($version) : '' ?><?= !empty($accountantName) ? ' · ' . e($accountantName) : '' ?><?php if ($currentUser !== null): ?> · <a href="<?= e($u('/uslovi')) ?>">Uslovi korišćenja</a><?php endif; ?>
 </footer>
 </body>
 </html>

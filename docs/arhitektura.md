@@ -25,6 +25,7 @@ Fiksni ugovori (ne menjati bez dogovora): `src/Kernel/*`, `src/Models/*`, `src/R
 |---|---|---|---|
 | GET | `/` | Panel | kontrolna tabla (ili preusmerenje na prijavu) |
 | GET/POST | `/prijava`, POST `/odjava` | Panel | prijava (+ TOTP), odjava |
+| GET/POST | `/uslovi` | Panel | uslovi korišćenja; administrator bez prihvaćene verzije `Terms::VERSION` preusmerava se ovde sa svih ekrana (BaseController) dok ne prihvati |
 | GET/POST | `/korisnici`, `/korisnici/novi`, `/korisnici/{id}`, POST `/korisnici/{id}/novi-kljuc`, POST `/korisnici/{id}/deaktiviraj` | Panel | korisnici i QR |
 | GET | `/korisnici/{id}/racuni?mesec=YYYY-MM`, `/korisnici/{id}/racuni.csv?mesec=` | Panel | računi po mesecu, CSV |
 | GET/POST | `/nalozi`, `/nalozi/novi`, POST `/nalozi/{id}/deaktiviraj`, `/aktiviraj`, `/lozinka`, `/resetuj-2fa` | Panel (admin) | zaposleni |

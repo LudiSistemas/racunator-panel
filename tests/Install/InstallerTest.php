@@ -7,6 +7,7 @@ use RacunatorPanel\Db\Connection;
 use RacunatorPanel\Install\Installer;
 use RacunatorPanel\Repositories\PdoSettingsRepository;
 use RacunatorPanel\Repositories\PdoUserRepository;
+use RacunatorPanel\Services\Terms;
 
 final class InstallerTest extends InstallTestCase
 {
@@ -26,6 +27,7 @@ final class InstallerTest extends InstallTestCase
             'admin_username' => 'marko',
             'admin_password' => 'Plavi-kofer-7-oblaka',
             'accountant_name' => 'Knjigovodstvo Marković',
+            'terms_accepted' => true,
             'ip' => '10.0.0.1',
         ];
     }
@@ -71,7 +73,47 @@ final class InstallerTest extends InstallTestCase
         $this->assertTrue($admin->isAdmin());
         $this->assertTrue(password_verify('Plavi-kofer-7-oblaka', $admin->passwordHash));
         $actions = array_column($pdo->query('SELECT action FROM audit_log')->fetchAll(), 'action');
-        $this->assertSame(['install'], $actions);
+        $this->assertSame([Terms::AUDIT_ACTION, 'install'], $actions);
+    }
+
+    public function testInstalacijaBezPrihvatanjaUslovaSeOdbija(): void
+    {
+        $root = $this->root();
+        $i = new Installer($root);
+        foreach ([[], ['terms_accepted' => false], ['terms_accepted' => 'da'], ['terms_accepted' => 1]] as $over) {
+            $in = $this->input($i);
+            unset($in['terms_accepted']);
+            try {
+                $i->install($over + $in);
+                $this->fail('Instalacija bez prihvaćenih uslova mora biti odbijena: ' . json_encode($over));
+            } catch (\InvalidArgumentException $e) {
+                $this->assertSame(Installer::TERMS_REQUIRED, $e->getMessage());
+            }
+        }
+        // Odbijeno pre bilo kakve izmene: nema config.php, privremenog configa ni SQLite baze.
+        $this->assertFalse($i->isInstalled());
+        $this->assertFileDoesNotExist($root . '/config.php.instalacija');
+        $this->assertFileDoesNotExist($root . '/storage/panel.sqlite');
+    }
+
+    public function testPrihvatanjeUslovaSeBeleziPriInstalaciji(): void
+    {
+        $root = $this->root();
+        $i = new Installer($root);
+        $before = gmdate('Y-m-d H:i:s');
+        $res = $i->install($this->input($i));
+        $pdo = Connection::open((require $root . '/config.php')['db']);
+        $s = new PdoSettingsRepository($pdo);
+        $this->assertSame((string) Terms::VERSION, $s->get(Terms::SETTING_VERSION));
+        $at = (string) $s->get(Terms::SETTING_AT);
+        $this->assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $at, 'UTC, YYYY-MM-DD HH:MM:SS');
+        $this->assertGreaterThanOrEqual($before, $at);
+        $this->assertLessThanOrEqual(gmdate('Y-m-d H:i:s'), $at);
+        $this->assertFalse(Terms::needsAcceptance($s));
+        $row = $pdo->query("SELECT user_id, ip, details FROM audit_log WHERE action = 'terms.accept'")->fetch();
+        $this->assertSame($res['user_id'], (int) $row['user_id']);
+        $this->assertSame('10.0.0.1', $row['ip']);
+        $this->assertSame(['version' => Terms::VERSION], json_decode((string) $row['details'], true));
     }
 
     public function testDrugaInstalacijaSeOdbija(): void

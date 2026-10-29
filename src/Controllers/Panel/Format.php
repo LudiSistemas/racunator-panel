@@ -48,6 +48,7 @@ final class Format
         'api.accountant_auth_fail' => 'Neuspeo pristup API-ju za knjigovođu (pogrešan ključ ili adresa)',
         'api.accountant_export' => 'Izvoz računa preko API-ja za knjigovođu',
         'install' => 'Instalacija',
+        'terms.accept' => 'Prihvaćeni uslovi korišćenja',
         'update.run' => 'Ažuriranje pokrenuto',
         'update.failed' => 'Ažuriranje nije uspelo',
         'update.warning' => 'Upozorenje pri ažuriranju',

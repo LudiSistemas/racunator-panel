@@ -5,9 +5,10 @@ declare(strict_types=1);
  * Instalacija i održavanje iz komandne linije (SSH, Docker test, document root = public/).
  *
  *   php install/cli.php provera
- *   php install/cli.php instaliraj --db=sqlite --url=https://domen.rs/panel --admin=marko --naziv="Knjigovodstvo XY"
+ *   php install/cli.php instaliraj --db=sqlite --url=https://domen.rs/panel --admin=marko --naziv="Knjigovodstvo XY" --prihvatam-uslove
  *   php install/cli.php instaliraj --db=mysql --db-host=localhost --db-port=3306 --db-name=panel --db-user=panel \
- *         --url=https://domen.rs/panel --admin=marko --naziv="Knjigovodstvo XY"
+ *         --url=https://domen.rs/panel --admin=marko --naziv="Knjigovodstvo XY" --prihvatam-uslove
+ *       --prihvatam-uslove je obavezan: prihvatanje uslova korišćenja (https://sistema.sh/uslovi, docs/uslovi-koriscenja.md)
  *       lozinke: env RACUNATOR_DB_PASS i RACUNATOR_ADMIN_PASSWORD (ili --db-pass= / --password=, vidljivo u istoriji ljuske)
  *       --storage=/apsolutna/putanja — folder za podatke van web root-a (podrazumevano storage/ u korenu)
  *   php install/cli.php kopija                      — nova rezervna kopija (fajlovi + baza)
@@ -30,6 +31,7 @@ use RacunatorPanel\Install\Checks;
 use RacunatorPanel\Install\Installer;
 use RacunatorPanel\Install\Updater;
 use RacunatorPanel\Services\NativeHttpClient;
+use RacunatorPanel\Services\Terms;
 
 if (PHP_SAPI !== 'cli') {
     http_response_code(404);
@@ -91,6 +93,14 @@ try {
                     $fail("Nedostaje --$req=…", 2);
                 }
             }
+            if (!isset($opt['prihvatam-uslove'])) {
+                $out('Uslovi korišćenja Računator panela (verzija ' . Terms::VERSION . ', ' . Terms::DATE . '):');
+                foreach (Terms::summary() as $point) {
+                    $out('  - ' . $point);
+                }
+                $out('Ceo tekst: ' . Terms::URL . ' (i ' . Terms::DOC . ').');
+                $fail('Instalacija nije moguća bez prihvatanja uslova: dodajte --prihvatam-uslove.', 2);
+            }
             $password = (string) (getenv('RACUNATOR_ADMIN_PASSWORD') ?: ($opt['password'] ?? ''));
             if ($password === '') {
                 $fail('Lozinka admina: env RACUNATOR_ADMIN_PASSWORD ili --password=', 2);
@@ -121,6 +131,7 @@ try {
                 'admin_username' => (string) $opt['admin'],
                 'admin_password' => $password,
                 'accountant_name' => (string) $opt['naziv'],
+                'terms_accepted' => true,
                 'ip' => '127.0.0.1',
             ]);
             $out('Instalirano: verzija ' . $res['version'] . ', migracije: ' . (implode(', ', $res['migrations']) ?: '-'));

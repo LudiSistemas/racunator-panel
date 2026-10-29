@@ -3,7 +3,8 @@ declare(strict_types=1);
 
 /*
  * Čarobnjak za instalaciju Računator panela i ručno ažuriranje.
- *   - Nema config.php → nova instalacija: provere → baza → javna adresa → prvi nalog → kraj.
+ *   - Nema config.php → nova instalacija: provere → baza → javna adresa → uslovi korišćenja → prvi nalog → kraj.
+ *     Bez prihvaćenih uslova (checkbox, provera na serveru) nema koraka „Prvi nalog“; Installer::install ih proverava ponovo.
  *   - Postoji config.php (install lock) → instalacija je zaključana; jedino je moguće ručno ažuriranje iz paketa koji je
  *     install fajl ostavio u storage/tmp/manual-update/ (posle prijave administratora panela, sa istom zaštitom kao u panelu;
  *     potpis paketa se proverava javnim ključem instalirane verzije).
@@ -21,6 +22,7 @@ use RacunatorPanel\Kernel\Request;
 use RacunatorPanel\Models\User;
 use RacunatorPanel\Services\AppFiles;
 use RacunatorPanel\Services\NativeHttpClient;
+use RacunatorPanel\Services\Terms;
 
 if (PHP_VERSION_ID < 80100) {
     http_response_code(500);
@@ -52,7 +54,7 @@ racunator_install_wizard($installer);
 /** Nova instalacija. */
 function racunator_install_wizard(Installer $installer): void
 {
-    $steps = [['provere', 'Provera hostinga'], ['baza', 'Baza'], ['adresa', 'Javna adresa'], ['nalog', 'Prvi nalog'], ['gotovo', 'Kraj']];
+    $steps = [['provere', 'Provera hostinga'], ['baza', 'Baza'], ['adresa', 'Javna adresa'], ['uslovi', 'Uslovi korišćenja'], ['nalog', 'Prvi nalog'], ['gotovo', 'Kraj']];
     $https = (($_SERVER['HTTPS'] ?? '') !== '' && $_SERVER['HTTPS'] !== 'off') || strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
     racunator_install_session($installer, $https);
 
@@ -85,8 +87,12 @@ function racunator_install_wizard(Installer $installer): void
     if ($step === 'adresa' && empty($_SESSION['db'])) {
         $step = 'baza';
     }
-    if ($step === 'nalog' && empty($_SESSION['public_url'])) {
+    if (($step === 'uslovi' || $step === 'nalog') && empty($_SESSION['public_url'])) {
         $step = empty($_SESSION['db']) ? 'baza' : 'adresa';
+    }
+    $termsOk = ($_SESSION['terms_accepted'] ?? 0) === Terms::VERSION;
+    if ($step === 'nalog' && !$termsOk) {
+        $step = 'uslovi';
     }
 
     switch ($step) {
@@ -189,7 +195,7 @@ function racunator_install_wizard(Installer $installer): void
                 $url = trim((string) ($_POST['public_url'] ?? ''));
                 try {
                     $_SESSION['public_url'] = Installer::normalizePublicUrl($url);
-                    header('Location: ?korak=nalog', true, 303);
+                    header('Location: ?korak=uslovi', true, 303);
                     return;
                 } catch (\InvalidArgumentException $e) {
                     $errors[] = $e->getMessage();
@@ -202,8 +208,39 @@ function racunator_install_wizard(Installer $installer): void
                 . 'promenite ga samo ako panel otvarate preko drugog domena.</p>' . Ui::errors($errors) . $warn
                 . '<form method="post" action="?korak=adresa" class="card">' . $tok
                 . Ui::input('public_url', 'Javna adresa panela', $url, 'url', 'Bez kose crte na kraju, npr. https://knjigovodstvo.rs/panel', ['required' => true])
-                . '<div class="actions"><a class="btn" href="?korak=baza">Nazad</a><button type="submit" class="primary">Dalje: prvi nalog</button></div></form>';
+                . '<div class="actions"><a class="btn" href="?korak=baza">Nazad</a><button type="submit" class="primary">Dalje: uslovi korišćenja</button></div></form>';
             Ui::page('Javna adresa', $body, $steps, 'adresa');
+            return;
+
+        case 'uslovi':
+            $errors = [];
+            if ($post) {
+                // Provera na serveru: bez označenog polja nema nastavka (atribut required u HTML-u je samo pomoć).
+                if (($_POST['prihvatam_uslove'] ?? '') === 'da') {
+                    $_SESSION['terms_accepted'] = Terms::VERSION;
+                    header('Location: ?korak=nalog', true, 303);
+                    return;
+                }
+                unset($_SESSION['terms_accepted']);
+                $termsOk = false;
+                $errors[] = 'Da biste nastavili instalaciju, označite „Prihvatam uslove korišćenja“.';
+            }
+            $li = '';
+            foreach (Terms::summary() as $point) {
+                $li .= '<li>' . Ui::e($point) . '</li>';
+            }
+            $body = '<p>Pre pravljenja prvog naloga pročitajte i prihvatite uslove korišćenja Računator panela (verzija '
+                . Ui::e((string) Terms::VERSION) . ', ' . Ui::e(Terms::DATE) . '). Ukratko:</p>'
+                . Ui::errors($errors)
+                . '<div class="card"><ul>' . $li . '</ul>'
+                . '<p>Ceo tekst: <a href="' . Ui::e(Terms::URL) . '" target="_blank" rel="noopener noreferrer">' . Ui::e(Terms::URL) . '</a> '
+                . '(i u fajlu <code>' . Ui::e(Terms::DOC) . '</code> u folderu panela). Za kod panela važi i licenca MIT (fajl <code>LICENSE</code>).</p></div>'
+                . '<form method="post" action="?korak=uslovi" class="card">' . $tok
+                . '<p><label><input type="checkbox" name="prihvatam_uslove" value="da" required' . ($termsOk ? ' checked' : '') . '> '
+                . '<strong>Prihvatam uslove korišćenja</strong></label></p>'
+                . '<p class="hint">Prihvatanje (verzija i vreme) beleži se u podešavanjima i u dnevniku radnji panela.</p>'
+                . '<div class="actions"><a class="btn" href="?korak=adresa">Nazad</a><button type="submit" class="primary">Dalje: prvi nalog</button></div></form>';
+            Ui::page('Uslovi korišćenja', $body, $steps, 'uslovi');
             return;
 
         case 'nalog':
@@ -227,6 +264,7 @@ function racunator_install_wizard(Installer $installer): void
                             'admin_username' => $form['admin_username'],
                             'admin_password' => $pw,
                             'accountant_name' => $form['accountant_name'],
+                            'terms_accepted' => $termsOk,
                             'ip' => (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'),
                         ]);
                     } catch (\Throwable $e) {
@@ -248,7 +286,7 @@ function racunator_install_wizard(Installer $installer): void
                 . '<div class="meter" id="meter" data-score="0"><i></i></div><small id="meter-label">najmanje 12 znakova</small>'
                 . Ui::input('admin_password2', 'Ponovite lozinku', '', 'password', '', ['required' => true, 'autocomplete' => 'new-password'])
                 . '<p class="hint">Savet: koristite frazu od nekoliko reči, npr. „plavi-kofer-sedam-oblaka". Lozinku čuvajte u menadžeru lozinki.</p>'
-                . '<div class="actions"><a class="btn" href="?korak=adresa">Nazad</a><button type="submit" class="primary">Instaliraj</button></div></form>';
+                . '<div class="actions"><a class="btn" href="?korak=uslovi">Nazad</a><button type="submit" class="primary">Instaliraj</button></div></form>';
             Ui::page('Prvi nalog', $body, $steps, 'nalog');
             return;
     }

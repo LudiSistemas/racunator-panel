@@ -16,11 +16,12 @@ use RacunatorPanel\Repositories\UserRepository;
 use RacunatorPanel\Services\AppFiles;
 use RacunatorPanel\Services\Backup;
 use RacunatorPanel\Services\HttpClient;
+use RacunatorPanel\Services\Terms;
 
 /**
  * Logika instalacije bez HTTP-a (koriste je čarobnjak install/index.php, install/cli.php i testovi).
- * Redosled: provera ulaza → storage/ → privremeni config → baza i migracije → prvi admin → podešavanja →
- * config.php (0600) → install_lock. config.php nastaje tek kad je baza spremna, pa prekinuta instalacija može da se ponovi.
+ * Redosled: provera ulaza (i prihvaćenih uslova korišćenja) → storage/ → privremeni config → baza i migracije → prvi admin →
+ * podešavanja (sa prihvatanjem uslova) → config.php (0600) → install_lock. config.php nastaje tek kad je baza spremna, pa prekinuta instalacija može da se ponovi.
  */
 final class Installer
 {
@@ -29,6 +30,7 @@ final class Installer
     public const TOKEN_FILE = 'tmp/install-token';
     /** Prefiks fajla kojim vlasnik hostinga dokazuje vlasništvo (pravi ga preko FTP-a u install/). */
     public const PROOF_PREFIX = 'DOZVOLA-';
+    public const TERMS_REQUIRED = 'Instalacija nije moguća bez prihvatanja uslova korišćenja (' . Terms::URL . ').';
 
     /** @var \Closure(\PDO):array{settings:SettingsRepository,users:UserRepository,audit:AuditLogRepository} */
     private \Closure $repos;
@@ -355,13 +357,17 @@ final class Installer
 
     /**
      * Cela instalacija.
-     * @param array{db:array,public_url:string,admin_username:string,admin_password:string,accountant_name:string,ip?:string,storage?:string} $in
+     * Bez izričitog prihvatanja uslova korišćenja (`terms_accepted` === true) instalacija se odbija pre bilo kakve izmene.
+     * @param array{db:array,public_url:string,admin_username:string,admin_password:string,accountant_name:string,terms_accepted:bool,ip?:string,storage?:string} $in
      * @return array{version:string,public_url:string,migrations:list<string>,user_id:int}
      */
     public function install(array $in): array
     {
         if ($this->isInstalled()) {
             throw new \RuntimeException('Panel je već instaliran (postoji config.php). Instaler se ne može ponovo pokrenuti.');
+        }
+        if (($in['terms_accepted'] ?? false) !== true) {
+            throw new \InvalidArgumentException(self::TERMS_REQUIRED);
         }
         $publicUrl = self::normalizePublicUrl((string) $in['public_url']);
         $errors = self::validateAdmin($in['admin_username'], $in['admin_password'], $in['admin_password'], $in['accountant_name']);
@@ -413,6 +419,7 @@ final class Installer
             $s->set('version', $version);
             $s->set('owned_tables', json_encode($owned));
             $s->set('installed_at', gmdate('Y-m-d H:i:s'));
+            Terms::accept($s, $repos['audit'], $admin->id, (string) ($in['ip'] ?? '0.0.0.0'));
 
             AppFiles::rename($tmp, $this->configFile());
             @chmod($this->configFile(), 0600);

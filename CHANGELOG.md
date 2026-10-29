@@ -1,5 +1,18 @@
 # Izmene
 
+## Neobjavljeno
+
+### Uslovi korišćenja
+- Čarobnjak za instalaciju ima nov korak **Uslovi korišćenja** (pre prvog naloga): kratak sažetak, link na
+  https://sistema.sh/uslovi i obavezno polje „Prihvatam uslove korišćenja"; bez njega instalacija ne ide dalje (provera na
+  serveru, a `Installer::install` je ponavlja). CLI: `php install/cli.php instaliraj … --prihvatam-uslove` (obavezno).
+- Prihvatanje se beleži u podešavanja (`terms_accepted_version`, `terms_accepted_at` u UTC-u) i u dnevnik radnji
+  (`terms.accept`, „Prihvaćeni uslovi korišćenja").
+- Verzija uslova je `Terms::VERSION` (sada 1). Kad je veća od prihvaćene (i na postojećim instalacijama koje uslove nikad
+  nisu prihvatile), administrator posle prijave vidi stranicu **Uslovi korišćenja** (`/uslovi`) i mora da ih prihvati pre
+  daljeg rada; nalozi zaposlenih nisu blokirani. Link „Uslovi korišćenja" je u podnožju panela.
+- Pun tekst uslova: `docs/uslovi-koriscenja.md` (isti tekst kao u aplikaciji Računator); link u README-u.
+
 ## 0.3.0 — 2026-10-29
 
 ### Podaci za proveru računa na stranici Poreske uprave

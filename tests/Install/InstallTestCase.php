@@ -111,6 +111,7 @@ abstract class InstallTestCase extends TestCase
         $settings = new PdoSettingsRepository($pdo);
         $settings->set('version', $version);
         $settings->set('install_lock', '1');
+        $settings->set(\RacunatorPanel\Services\Terms::SETTING_VERSION, (string) \RacunatorPanel\Services\Terms::VERSION);
         $settings->set('owned_tables', json_encode(\RacunatorPanel\Services\Backup::listTables($pdo)));
         return ['root' => $root, 'pdo' => $pdo, 'settings' => $settings, 'audit' => new PdoAuditLogRepository($pdo)];
     }

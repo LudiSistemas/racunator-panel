@@ -87,7 +87,17 @@ se čim se upiše `config.php`.
 Predlog je adresa iz pregledača, npr. `https://vas-domen.rs/panel`. To je adresa na koju aplikacija Računator šalje
 račune — mora početi sa **https://**. Promenite je samo ako panel otvarate preko drugog domena.
 
-### 7. Čarobnjak: prvi nalog
+### 7. Čarobnjak: uslovi korišćenja
+Kratak sažetak uslova i link na ceo tekst ([uslovi-koriscenja.md](uslovi-koriscenja.md), <https://sistema.sh/uslovi>).
+Bez označenog polja **Prihvatam uslove korišćenja** čarobnjak ne ide na pravljenje prvog naloga (provera je na serveru, a
+instaler je ponavlja i pri samoj instalaciji). Prihvaćena verzija i vreme (UTC) upisuju se u podešavanja
+(`terms_accepted_version`, `terms_accepted_at`), a u dnevnik radnji stavka „Prihvaćeni uslovi korišćenja" (`terms.accept`).
+
+Kad nova verzija panela donese izmenjene uslove (veći `Terms::VERSION` u `src/Services/Terms.php`), administrator posle
+ažuriranja, pri prvom otvaranju panela, vidi stranicu **Uslovi korišćenja** i mora ponovo da ih prihvati; dok to ne uradi,
+ostali ekrani ga vraćaju na tu stranicu. Nalozi zaposlenih nisu blokirani.
+
+### 8. Čarobnjak: prvi nalog
 - **Naziv knjigovodstva** — vide ga vaši klijenti u aplikaciji posle skeniranja QR koda.
 - **Korisničko ime** i **lozinka** administratora (najmanje 12 znakova; merač pokazuje jačinu; savet: fraza od nekoliko reči).
 
@@ -95,7 +105,7 @@ Klik na **Instaliraj**: panel upisuje `config.php` (prava 0600 od prvog trenutka
 pravi folder za podatke (`storage/` zaštićen od pristupa preko veba, ili izabrani folder van web root-a), pravi tabele u bazi,
 nalog administratora i zaključava instaler.
 
-### 8. Kraj
+### 9. Kraj
 *Slika ekrana (opis): zelena poruka „Panel je instaliran", ispod nje „Panel odgovara na …/health", i dugme „Otvori prijavu".*
 
 Install fajl se sam briše. Folder `install/` ostaje: koristi se samo za ručno ažuriranje i zaključan je dok postoji
@@ -148,9 +158,10 @@ zadržite podatke, vratite `config.php` iz rezervne kopije umesto ponovne instal
   ```
   php racunator-panel-install.php
   RACUNATOR_ADMIN_PASSWORD='…' RACUNATOR_DB_PASS='…' php install/cli.php instaliraj --db=mysql --db-host=localhost \
-      --db-name=panel --db-user=panel --url=https://vas-domen.rs/panel --admin=marko --naziv="Knjigovodstvo XY"
+      --db-name=panel --db-user=panel --url=https://vas-domen.rs/panel --admin=marko --naziv="Knjigovodstvo XY" \
+      --prihvatam-uslove
   ```
-  (`--db=sqlite` za SQLite; `--storage=/home/nalog/racunator-podaci` za folder za podatke van web root-a;
+  (`--prihvatam-uslove` je obavezan — bez njega komanda ispiše sažetak uslova i ne instalira; `--db=sqlite` za SQLite; `--storage=/home/nalog/racunator-podaci` za folder za podatke van web root-a;
   `php install/cli.php provera` samo pokreće provere.)
 - **Document root = `public/`** (VPS, sopstveni virtual host): koreni `.htaccess` tada nije potreban, a čarobnjak `install/` nije
   dostupan preko veba — instalirajte preko `install/cli.php` (gore). Ručno ažuriranje u tom slučaju: `php install/cli.php azuriraj`.

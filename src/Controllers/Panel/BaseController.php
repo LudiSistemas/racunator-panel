@@ -8,10 +8,13 @@ use RacunatorPanel\Auth\AccountGuard;
 use RacunatorPanel\Kernel\Request;
 use RacunatorPanel\Kernel\Response;
 use RacunatorPanel\Models\User;
+use RacunatorPanel\Services\Terms;
 
 /**
  * Zajedničke usluge kontrolera panela: provera prijave i uloge, CSRF, adrese sa osnovnom putanjom instalacije,
  * renderovanje stranice u `layout`, dnevnik radnji.
+ * Uslovi korišćenja: administrator koji nije prihvatio važeću verziju (`Terms::VERSION`, npr. posle ažuriranja na
+ * verziju sa novim uslovima) preusmerava se na `/uslovi` sa svakog ekrana koji traži prijavu; ostali nalozi nisu blokirani.
  */
 abstract class BaseController
 {
@@ -69,14 +72,18 @@ abstract class BaseController
         return $user;
     }
 
-    /** null = u redu; inače preusmerenje na prijavu. */
-    protected function requireUser(): ?Response
+    /** null = u redu; inače preusmerenje na prijavu (ili na `/uslovi` za administratora bez prihvaćenih uslova). */
+    protected function requireUser(bool $termsGate = true): ?Response
     {
-        return $this->currentUser() === null ? $this->redirect('/prijava') : null;
+        $user = $this->currentUser();
+        if ($user === null) {
+            return $this->redirect('/prijava');
+        }
+        return $termsGate ? $this->termsGate($user) : null;
     }
 
-    /** null = u redu; neprijavljen → prijava, zaposleni → 403. */
-    protected function requireAdmin(): ?Response
+    /** null = u redu; neprijavljen → prijava, zaposleni → 403, admin bez prihvaćenih uslova → `/uslovi`. */
+    protected function requireAdmin(bool $termsGate = true): ?Response
     {
         $user = $this->currentUser();
         if ($user === null) {
@@ -84,6 +91,15 @@ abstract class BaseController
         }
         if (!$user->isAdmin()) {
             return $this->error(403, 'Nemate pravo pristupa', 'Ovaj deo panela je dostupan samo administratoru.');
+        }
+        return $termsGate ? $this->termsGate($user) : null;
+    }
+
+    /** Administrator mora da prihvati važeću verziju uslova korišćenja pre daljeg rada; ostali nalozi prolaze. */
+    protected function termsGate(User $user): ?Response
+    {
+        if ($user->isAdmin() && Terms::needsAcceptance($this->app->settings)) {
+            return $this->redirect('/uslovi');
         }
         return null;
     }

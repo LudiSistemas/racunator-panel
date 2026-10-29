@@ -51,6 +51,8 @@ abstract class PanelTestCase extends TestCase
         $this->guard = new FakeGuard($this->users);
         $this->session = new ArraySession();
         $this->settings->set('accountant_name', 'Knjigovodstvo Šušnjar');
+        // Instaliran panel sa prihvaćenim važećim uslovima (gate za administratora testira TermsTest).
+        $this->settings->set(\RacunatorPanel\Services\Terms::SETTING_VERSION, (string) \RacunatorPanel\Services\Terms::VERSION);
 
         // App::url koristi osnovnu putanju koju inače postavlja App::create.
         Authorization::setBasePath('/panel');

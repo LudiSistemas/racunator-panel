@@ -15,9 +15,13 @@ Mali panel za knjigovođe koji prima račune iz aplikacije **Računator** (Andro
 ## Instalacija (kratko)
 1. Preuzmite `racunator-panel-install.php` sa stranice izdanja.
 2. Otpremite ga u folder na hostingu (npr. `public_html/panel/`) i otvorite u pregledaču.
-3. Pratite čarobnjak: provera hostinga, baza, javna adresa, prvi nalog.
+3. Pratite čarobnjak: provera hostinga, baza, javna adresa, uslovi korišćenja, prvi nalog.
 
 Detalji: [docs/instalacija.md](docs/instalacija.md). Bezbednost: [docs/bezbednost.md](docs/bezbednost.md). API: [docs/api.md](docs/api.md).
+
+## Uslovi korišćenja
+Panel se daje „kakav jeste“, bez garancija; račune klijenata proveravate na zvaničnom portalu Poreske uprave. Pri instalaciji
+uslove treba prihvatiti: [docs/uslovi-koriscenja.md](docs/uslovi-koriscenja.md) (i na <https://sistema.sh/uslovi>).
 
 ## Razvoj
 Zahteva PHP 8.1+ i Composer (samo za testove). `composer install && composer test`. Vidi [docs/razvoj.md](docs/razvoj.md).

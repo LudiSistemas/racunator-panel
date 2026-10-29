@@ -377,7 +377,7 @@ if ($update) {
 
 file_put_contents($dir . '/storage/tmp/installer-stub.json', json_encode(array('file' => $self)));
 if (rpi_cli()) {
-    rpi_page('Panel je raspakovan', '<p>Sledeći korak: php install/cli.php instaliraj --db=sqlite --url=https://domen.rs/panel --admin=ime --naziv="Knjigovodstvo" '
+    rpi_page('Panel je raspakovan', '<p>Sledeći korak: php install/cli.php instaliraj --db=sqlite --url=https://domen.rs/panel --admin=ime --naziv="Knjigovodstvo" --prihvatam-uslove '
         . '(lozinka u env RACUNATOR_ADMIN_PASSWORD), ili php install/cli.php dozvola (adresa čarobnjaka za pregledač).</p>', 200);
 }
 if (is_file($tokenFile)) {
