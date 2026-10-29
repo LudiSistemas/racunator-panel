@@ -37,6 +37,10 @@ final class ClientApiController
 
     private const INVOICE_RE = '/^[A-Z0-9]{8}-[A-Z0-9]{8}-\d{1,10}$/';
     private const URL_PREFIX = 'https://suf.purs.gov.rs/';
+    /** Brojač računa `transactionTypeCounter/totalCounter`, npr. `123/456`. */
+    public const COUNTER_RE = '/^\d{1,10}\/\d{1,10}$/D';
+    /** Nastavak brojača: 1–4 velika slova, ćirilica ili latinica (npr. `ПП`, `ПР`, `КП`). */
+    public const COUNTER_EXTENSION_RE = '/^(?:(?=\p{Lu})[\p{Latin}\p{Cyrillic}]){1,4}$/uD';
     private const DATETIME_RE = '/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?$/';
 
     public function __construct(
@@ -227,6 +231,18 @@ final class ClientApiController
             }
             $out[$field] = $v === null ? null : (trim($v) === '' ? null : trim($v));
         }
+        // Podaci za proveru na stranici /verify; nedostaje, null ili prazan tekst → null.
+        $counter = $item['invoiceCounter'] ?? null;
+        if ($counter !== null && $counter !== '' && (!is_string($counter) || !preg_match(self::COUNTER_RE, $counter))) {
+            return [null, 'invoiceCounter: očekuje se brojač oblika N/N (npr. 123/456) ili null'];
+        }
+        $out['invoiceCounter'] = $counter === '' ? null : $counter;
+        $extension = $item['invoiceCounterExtension'] ?? null;
+        if ($extension !== null && $extension !== ''
+            && (!is_string($extension) || preg_match(self::COUNTER_EXTENSION_RE, $extension) !== 1)) {
+            return [null, 'invoiceCounterExtension: očekuje se 1–4 velika slova, ćirilica ili latinica (npr. ПП) ili null'];
+        }
+        $out['invoiceCounterExtension'] = $extension === '' ? null : $extension;
         $raw = json_encode($item, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $out['rawJson'] = is_string($raw) && strlen($raw) <= self::MAX_RAW_JSON ? $raw : null;
         return [$out, null];

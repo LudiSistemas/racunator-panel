@@ -60,7 +60,7 @@ final class ReceiptsTest extends PanelTestCase
         $csv = $response->body;
         self::assertStringStartsWith("\xEF\xBB\xBF", $csv);
         $lines = explode("\r\n", rtrim(substr($csv, 3), "\r\n"));
-        self::assertSame('Datum;Prodavac;"PIB prodavca";"PIB kupca";Iznos;"PFR broj";"Vrsta računa";"Vrsta transakcije";"Link za proveru";Izvor', $lines[0]);
+        self::assertSame('Datum;Prodavac;"PIB prodavca";"PIB kupca";Iznos;"PFR broj";"Vrsta računa";"Vrsta transakcije";"Link za proveru";Izvor;Brojač;Nastavak', $lines[0]);
         self::assertCount(4, $lines);
         self::assertStringStartsWith('"02.10.2026 08:00:00";', $lines[1]);
         // Zaštita od formula u Excel-u.
@@ -68,7 +68,7 @@ final class ReceiptsTest extends PanelTestCase
         self::assertStringContainsString(';1234,56;', $lines[3]);
         self::assertStringContainsString(';1,00;', $lines[2]);
         self::assertStringContainsString('RCVG4AFL-RCVG4AFL-2;Promet;prodaja;https://suf.purs.gov.rs/v/?vl=', $lines[3]);
-        self::assertStringEndsWith(';QR', $lines[3]);
+        self::assertStringEndsWith(';QR;;', $lines[3], 'bez brojača su kolone Brojač i Nastavak prazne');
         self::assertSame(['receipts.export'], $this->audit->actions());
     }
 
@@ -103,7 +103,62 @@ final class ReceiptsTest extends PanelTestCase
         $lines = explode("\r\n", rtrim(substr($this->get('/korisnici/' . $this->client->id . '/racuni.csv', ['mesec' => '2026-10'])->body, 3), "\r\n"));
         self::assertCount(5, $lines);
         self::assertStringContainsString('RCVG4AFL-RCVG4AFL-7;Promet;prodaja;https://suf.purs.gov.rs/verify;"PFR broj"', $lines[3]);
-        self::assertStringEndsWith(';QR', $lines[1]);
+        self::assertStringEndsWith(';QR;;', $lines[1]);
+    }
+
+    public function testPodaciZaProveruZaRacunPoPfrBroju(): void
+    {
+        $this->addReceipt($this->client->id, 'RCVG4AFL-RCVG4AFL-8', '2026-10-20T15:51:42', 627000, [
+            'source' => 'pfr', 'verificationUrl' => 'https://suf.purs.gov.rs/verify',
+            'invoiceCounter' => '123/456', 'invoiceCounterExtension' => 'ПП',
+        ]);
+        $this->addReceipt($this->client->id, 'RCVG4AFL-RCVG4AFL-9', '2026-10-21T09:05:00', 100, [
+            'source' => 'pfr', 'verificationUrl' => 'https://suf.purs.gov.rs/verify',
+        ]);
+        // QR račun sa brojačem: blok se ne prikazuje, link ostaje.
+        $this->addReceipt($this->client->id, 'RCVG4AFL-RCVG4AFL-10', '2026-10-22T10:00:00', 100, [
+            'invoiceCounter' => '7/8', 'invoiceCounterExtension' => 'ПП',
+        ]);
+        $ids = [];
+        foreach ($this->receipts->receipts as $r) {
+            $ids[$r->invoiceNumber] = $r->id;
+        }
+        $id = $ids['RCVG4AFL-RCVG4AFL-8'];
+        $body = $this->get('/korisnici/' . $this->client->id . '/racuni', ['mesec' => '2026-10'])->body;
+
+        self::assertSame(2, substr_count($body, '<p class="verify-title">Podaci za proveru</p>'), 'samo uz dva PFR računa');
+        self::assertSame(2, substr_count($body, 'Proveri na sajtu Poreske uprave</a>'));
+        self::assertStringContainsString('data-copy="pfr-' . $id . '">Kopiraj PFR broj</button>', $body);
+        self::assertStringContainsString('<code id="brojac-' . $id . '">123/456</code>', $body);
+        self::assertStringContainsString('<code id="nastavak-' . $id . '">ПП</code>', $body);
+        self::assertStringContainsString('data-copy="brojac-' . $id . '">Kopiraj brojač</button>', $body);
+        self::assertStringContainsString('data-copy="nastavak-' . $id . '">Kopiraj nastavak</button>', $body);
+        // PFR vreme u obliku zvanične forme (bez sekundi) i iznos sa tačkom i zarezom.
+        self::assertStringContainsString('<code id="vreme-' . $id . '" data-copy-exact>20.10.2026. 15:51</code>', $body);
+        self::assertStringContainsString('data-copy="vreme-' . $id . '">Kopiraj vreme</button>', $body);
+        self::assertStringContainsString('<code id="iznos-' . $id . '">6.270,00</code>', $body);
+        self::assertStringContainsString('data-copy="iznos-' . $id . '">Kopiraj iznos</button>', $body);
+
+        // PFR račun bez brojača: crtica, bez dugmadi za brojač.
+        $noCounter = $ids['RCVG4AFL-RCVG4AFL-9'];
+        self::assertStringContainsString('— (aplikacija nije poslala)', $body);
+        self::assertStringNotContainsString('brojac-' . $noCounter . '"', $body);
+        self::assertStringContainsString('<code id="vreme-' . $noCounter . '" data-copy-exact>21.10.2026. 09:05</code>', $body);
+        // QR račun: nema bloka ni dugmadi za kopiranje brojača.
+        $qr = $ids['RCVG4AFL-RCVG4AFL-10'];
+        self::assertStringNotContainsString('brojac-' . $qr . '"', $body);
+        self::assertStringNotContainsString('vreme-' . $qr . '"', $body);
+
+        $csv = $this->get('/korisnici/' . $this->client->id . '/racuni.csv', ['mesec' => '2026-10'])->body;
+        $lines = explode("\r\n", rtrim(substr($csv, 3), "\r\n"));
+        $byInvoice = [];
+        foreach (array_slice($lines, 1) as $line) {
+            preg_match('/RCVG4AFL-RCVG4AFL-\d+/', $line, $m);
+            $byInvoice[$m[0]] = $line;
+        }
+        self::assertStringEndsWith(';https://suf.purs.gov.rs/verify;"PFR broj";123/456;ПП', $byInvoice['RCVG4AFL-RCVG4AFL-8']);
+        self::assertStringEndsWith(';https://suf.purs.gov.rs/verify;"PFR broj";;', $byInvoice['RCVG4AFL-RCVG4AFL-9']);
+        self::assertStringEndsWith(';QR;7/8;ПП', $byInvoice['RCVG4AFL-RCVG4AFL-10']);
     }
 
     public function testMnozinaUPregleduPoMesecima(): void

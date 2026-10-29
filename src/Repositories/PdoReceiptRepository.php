@@ -9,10 +9,12 @@ use RacunatorPanel\Models\Receipt;
 /**
  * Računi u tabeli `receipts`. `insertIfNew` očekuje već proverene podatke sa ključevima kao u API-ju:
  * invoiceNumber, verificationUrl, sdcDateTime ('YYYY-MM-DDTHH:MM:SS'), totalAmountMinor (int),
- * opciono source ('qr' podrazumevano | 'pfr'), sellerName, sellerPib, buyerPib, invoiceType, transactionType, rawJson.
+ * opciono source ('qr' podrazumevano | 'pfr'), sellerName, sellerPib, buyerPib, invoiceType, transactionType,
+ * invoiceCounter, invoiceCounterExtension, rawJson.
  * Mesec se računa po `sdc_datetime` (vreme sa računa), ne po vremenu prijema.
  * Nadogradnja: postojeći račun sa source = 'pfr' + nova stavka sa source = 'qr' i pravim linkom iz QR koda
- * (`https://suf.purs.gov.rs/v/?vl=…`) → red se ažurira podacima nove stavke (vreme prijema ostaje prvobitno).
+ * (`https://suf.purs.gov.rs/v/?vl=…`) → red se ažurira podacima nove stavke (vreme prijema ostaje prvobitno; brojač i
+ * nastavak brojača se zamenjuju samo ako ih nova stavka ima, inače ostaju sačuvani).
  */
 final class PdoReceiptRepository implements ReceiptRepository
 {
@@ -33,8 +35,8 @@ final class PdoReceiptRepository implements ReceiptRepository
                 && $this->upgrade($clientId, $invoice, $data);
         }
         $stmt = $this->pdo->prepare('INSERT INTO receipts (client_id, invoice_number, verification_url, sdc_datetime,'
-            . ' total_amount_minor, seller_name, seller_pib, buyer_pib, invoice_type, transaction_type, received_at, raw_json, source)'
-            . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            . ' total_amount_minor, seller_name, seller_pib, buyer_pib, invoice_type, transaction_type, received_at, raw_json, source,'
+            . ' invoice_counter, invoice_counter_extension) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         try {
             $stmt->execute([
                 $clientId,
@@ -50,6 +52,8 @@ final class PdoReceiptRepository implements ReceiptRepository
                 gmdate('Y-m-d H:i:s'),
                 $data['rawJson'] ?? null,
                 $source,
+                $data['invoiceCounter'] ?? null,
+                $data['invoiceCounterExtension'] ?? null,
             ]);
         } catch (\PDOException $e) {
             // Trka dva istovremena zahteva: drugi upis pada na UNIQUE(client_id, invoice_number).
@@ -144,7 +148,8 @@ final class PdoReceiptRepository implements ReceiptRepository
     private function upgrade(int $clientId, string $invoice, array $data): bool
     {
         $stmt = $this->pdo->prepare('UPDATE receipts SET verification_url = ?, source = ?, sdc_datetime = ?, total_amount_minor = ?,'
-            . ' seller_name = ?, seller_pib = ?, buyer_pib = ?, invoice_type = ?, transaction_type = ?, raw_json = ?'
+            . ' seller_name = ?, seller_pib = ?, buyer_pib = ?, invoice_type = ?, transaction_type = ?, raw_json = ?,'
+            . ' invoice_counter = COALESCE(?, invoice_counter), invoice_counter_extension = COALESCE(?, invoice_counter_extension)'
             . ' WHERE client_id = ? AND invoice_number = ? AND source = ?');
         $stmt->execute([
             (string) $data['verificationUrl'],
@@ -157,6 +162,8 @@ final class PdoReceiptRepository implements ReceiptRepository
             $data['invoiceType'] ?? null,
             $data['transactionType'] ?? null,
             $data['rawJson'] ?? null,
+            $data['invoiceCounter'] ?? null,
+            $data['invoiceCounterExtension'] ?? null,
             $clientId,
             $invoice,
             Receipt::SOURCE_PFR,
@@ -200,6 +207,8 @@ final class PdoReceiptRepository implements ReceiptRepository
             $opt($r['transaction_type']),
             (string) $r['received_at'],
             (string) ($r['source'] ?? Receipt::SOURCE_QR),
+            $opt($r['invoice_counter'] ?? null),
+            $opt($r['invoice_counter_extension'] ?? null),
         );
     }
 }

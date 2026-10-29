@@ -59,16 +59,20 @@ ponovo da skenira.
 4. Dugme **Otvori na sajtu Poreske uprave** otvara originalni račun (sa stavkama) na `suf.purs.gov.rs` u novoj kartici.
    Panel prikazuje dugme samo za linkove koji zaista vode na sajt Poreske uprave.
    Račun koji je korisnik u aplikaciji uneo **po PFR broju** (bez QR koda) ima oznaku **PFR broj** i umesto toga dugme
-   **Proveri na sajtu Poreske uprave**, koje otvara zvaničnu stranicu `https://suf.purs.gov.rs/verify`; tamo ukucate PFR broj
-   (dugme **Kopiraj PFR broj** ga kopira). Ako korisnik kasnije skenira QR kod istog računa, panel sam zameni zapis
-   pravim linkom i oznaka nestaje.
+   **Proveri na sajtu Poreske uprave**, koje otvara zvaničnu stranicu `https://suf.purs.gov.rs/verify`. Uz dugme je blok
+   **Podaci za proveru** sa svim što ta stranica traži: PFR broj, brojač sa nastavkom (npr. `123/456 ПП`), PFR vreme u
+   obliku forme (npr. `20.10.2026. 15:51`) i iznos (npr. `6.270,00`) — svaki podatak ima svoje dugme za kopiranje
+   (**Kopiraj PFR broj**, **Kopiraj brojač**, **Kopiraj nastavak**, **Kopiraj vreme**, **Kopiraj iznos**). Ako aplikacija
+   nije poslala brojač (starija verzija), umesto njega piše „— (aplikacija nije poslala)". Ako korisnik kasnije skenira QR
+   kod istog računa, panel sam zameni zapis pravim linkom i oznaka nestaje.
 5. Ispod tabele je zbir iznosa za mesec (sabira sve primljene račune, uključujući refundacije).
 
 ## Izvoz u CSV
 Na stranici računa kliknite **Preuzmi CSV**. Fajl sadrži račune izabranog meseca i otvara se direktno u Excel-u
 (srpska podešavanja): kodiranje UTF-8, razdvajač tačka-zarez (`;`), iznos sa decimalnim zarezom (npr. `1234,56`).
 Kolone: Datum, Prodavac, PIB prodavca, PIB kupca, Iznos, PFR broj, Vrsta računa, Vrsta transakcije, Link za proveru,
-Izvor (`QR` — račun iz QR koda; `PFR broj` — račun unet po PFR broju, link je stranica za proveru po PFR broju).
+Izvor (`QR` — račun iz QR koda; `PFR broj` — račun unet po PFR broju, link je stranica za proveru po PFR broju),
+Brojač (npr. `123/456`) i Nastavak (npr. `ПП`) — prazno ako ih aplikacija nije poslala.
 Svaki izvoz se beleži u dnevnik.
 
 ## Nalozi (samo administrator)

@@ -2,7 +2,7 @@
  * Računator panel — minimalan JavaScript (bez inline skripti; CSP ih zabranjuje).
  * - potvrde za opasne radnje: atribut data-confirm na formi, linku ili dugmetu
  * - crtanje QR koda iz atributa data-qr (biblioteka qrcode.min.js, lokalno)
- * - kopiranje teksta: dugme sa data-copy="<id elementa>"
+ * - kopiranje teksta: dugme sa data-copy="<id elementa>" (razmaci se izbacuju; element sa data-copy-exact ih zadržava)
  * - štampa: dugme sa data-print
  * - automatsko slanje forme pri izboru: <select data-autosubmit>
  */
@@ -65,8 +65,11 @@
     if (!source) {
       return;
     }
-    // Razmaci služe samo za čitljivost (npr. TOTP tajna u grupama).
-    var text = (source.textContent || '').replace(/\s+/g, '');
+    // Razmaci služe samo za čitljivost (npr. TOTP tajna u grupama); data-copy-exact: razmak je deo vrednosti
+    // (npr. PFR vreme „20.10.2026. 15:51").
+    var text = source.hasAttribute('data-copy-exact')
+      ? (source.textContent || '').replace(/\s+/g, ' ').trim()
+      : (source.textContent || '').replace(/\s+/g, '');
     var done = function () { flash(button, 'Kopirano'); };
     var fallback = function () {
       var range = document.createRange();

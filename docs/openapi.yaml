@@ -80,6 +80,8 @@ paths:
                   buyerPib: "101234567"
                   invoiceType: Normal
                   transactionType: Sale
+                  invoiceCounter: 123/456
+                  invoiceCounterExtension: ПП
                 - invoiceNumber: RCVG4AFL-RCVG4AFL-234121
                   source: pfr
                   verificationUrl: https://suf.purs.gov.rs/verify
@@ -90,6 +92,8 @@ paths:
                   buyerPib: "101234567"
                   invoiceType: Normal
                   transactionType: Sale
+                  invoiceCounter: 124/457
+                  invoiceCounterExtension: ПП
       responses:
         "200":
           description: Obrađeno. Svaki račun je u tačno jednoj od lista.
@@ -556,6 +560,20 @@ components:
         transactionType:
           type: [string, "null"]
           maxLength: 200
+        invoiceCounter:
+          type: [string, "null"]
+          pattern: "^\\d{1,10}/\\d{1,10}$"
+          description: >-
+            Brojač računa `transactionTypeCounter/totalCounter` (podatak za proveru na stranici /verify). Nedostaje, `null`
+            ili prazan tekst → `null`; neispravna vrednost odbija račun.
+          examples: ["123/456"]
+        invoiceCounterExtension:
+          type: [string, "null"]
+          pattern: "^[A-ZА-ЯЂЈЉЊЋЏ]{1,4}$"
+          description: >-
+            Nastavak brojača: 1–4 velika slova, ćirilica ili latinica (npr. `ПП`, `ПР`, `КП`). Panel prihvata sva velika
+            slova latinice i ćirilice; obrazac navodi uobičajena. Nedostaje, `null` ili prazan tekst → `null`.
+          examples: ["ПП"]
       if:
         properties:
           source:
@@ -642,7 +660,7 @@ components:
     KnjigovodjaRacun:
       type: object
       required: [id, clientId, invoiceNumber, verificationUrl, sdcDateTime, totalAmountMinor, sellerName, sellerPib,
-        buyerPib, invoiceType, transactionType, source, receivedAt]
+        buyerPib, invoiceType, transactionType, source, invoiceCounter, invoiceCounterExtension, receivedAt]
       properties:
         id:
           type: integer
@@ -680,6 +698,14 @@ components:
           description: >-
             `qr` — račun iz QR koda (`verificationUrl` otvara račun sa stavkama); `pfr` — račun unet po PFR broju
             (`verificationUrl` je `https://suf.purs.gov.rs/verify`, stranica za proveru po PFR broju).
+        invoiceCounter:
+          type: [string, "null"]
+          description: Brojač računa `transactionTypeCounter/totalCounter`, npr. `123/456`; `null` ako ga aplikacija nije poslala.
+          examples: ["123/456"]
+        invoiceCounterExtension:
+          type: [string, "null"]
+          description: Nastavak brojača, npr. `ПП`; `null` ako ga aplikacija nije poslala.
+          examples: ["ПП"]
         receivedAt:
           type: string
           format: date-time

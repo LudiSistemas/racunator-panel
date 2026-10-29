@@ -155,6 +155,60 @@ final class ClientApiTest extends TestCase
         self::assertSame('101234567', $saved[0]->buyerPib);
     }
 
+    public function testBrojacINastavakBrojaca(): void
+    {
+        $good = [
+            'AAAAAAAA-BBBBBBBB-40' => [['invoiceCounter' => '123/456', 'invoiceCounterExtension' => 'ПП'], ['123/456', 'ПП']],
+            'AAAAAAAA-BBBBBBBB-41' => [['invoiceCounter' => '1/1', 'invoiceCounterExtension' => 'PR'], ['1/1', 'PR']],
+            'AAAAAAAA-BBBBBBBB-42' => [['invoiceCounter' => '1234567890/1234567890', 'invoiceCounterExtension' => 'ЂЏЉЊ'],
+                ['1234567890/1234567890', 'ЂЏЉЊ']],
+            'AAAAAAAA-BBBBBBBB-43' => [['invoiceCounter' => null, 'invoiceCounterExtension' => null], [null, null]],
+            'AAAAAAAA-BBBBBBBB-44' => [[], [null, null]],
+            'AAAAAAAA-BBBBBBBB-45' => [['invoiceCounter' => '', 'invoiceCounterExtension' => ''], [null, null]],
+            'AAAAAAAA-BBBBBBBB-46' => [['source' => 'pfr', 'verificationUrl' => 'https://suf.purs.gov.rs/verify',
+                'invoiceCounter' => '5/9', 'invoiceCounterExtension' => 'КП'], ['5/9', 'КП']],
+        ];
+        $bad = [
+            'AAAAAAAA-BBBBBBBB-50' => ['invoiceCounter' => '123-456'],
+            'AAAAAAAA-BBBBBBBB-51' => ['invoiceCounter' => '123/'],
+            'AAAAAAAA-BBBBBBBB-52' => ['invoiceCounter' => '12345678901/1'],
+            'AAAAAAAA-BBBBBBBB-53' => ['invoiceCounter' => 123],
+            'AAAAAAAA-BBBBBBBB-54' => ['invoiceCounter' => "123/456\n"],
+            'AAAAAAAA-BBBBBBBB-55' => ['invoiceCounter' => ' 123/456'],
+            'AAAAAAAA-BBBBBBBB-56' => ['invoiceCounterExtension' => 'пп'],
+            'AAAAAAAA-BBBBBBBB-57' => ['invoiceCounterExtension' => 'ППППП'],
+            'AAAAAAAA-BBBBBBBB-58' => ['invoiceCounterExtension' => 'П1'],
+            'AAAAAAAA-BBBBBBBB-59' => ['invoiceCounterExtension' => 'ΠΠ'],
+            'AAAAAAAA-BBBBBBBB-60' => ['invoiceCounterExtension' => ['ПП']],
+            'AAAAAAAA-BBBBBBBB-61' => ['invoiceCounterExtension' => "ПП\n"],
+            'AAAAAAAA-BBBBBBBB-62' => ['invoiceCounterExtension' => 'П П'],
+        ];
+        $items = [];
+        foreach ($good as $inv => [$override]) {
+            $items[] = self::receipt($inv, $override);
+        }
+        foreach ($bad as $inv => $override) {
+            $items[] = self::receipt($inv, $override);
+        }
+        $data = self::data($this->post(['receipts' => $items]));
+        self::assertSame(array_keys($good), $data['accepted']);
+        $rejected = array_column($data['rejected'], 'reason', 'invoiceNumber');
+        self::assertSame(array_keys($bad), array_keys($rejected));
+        foreach ($bad as $inv => $override) {
+            self::assertStringStartsWith(array_key_first($override) . ': ', $rejected[$inv], $inv);
+        }
+        self::assertStringContainsString('123/456', $rejected['AAAAAAAA-BBBBBBBB-50']);
+        self::assertStringContainsString('ПП', $rejected['AAAAAAAA-BBBBBBBB-56']);
+
+        $saved = [];
+        foreach ((new PdoReceiptRepository($this->pdo))->forClientMonth($this->client->id, '2026-10') as $r) {
+            $saved[$r->invoiceNumber] = [$r->invoiceCounter, $r->invoiceCounterExtension];
+        }
+        foreach ($good as $inv => [, $expected]) {
+            self::assertSame($expected, $saved[$inv], $inv);
+        }
+    }
+
     public function testValidacija(): void
     {
         $bad = [

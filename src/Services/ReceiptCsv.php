@@ -10,7 +10,8 @@ use RacunatorPanel\Repositories\ReceiptRepository;
 /**
  * Zajednički izvoz računa u CSV (panel „Preuzmi CSV" i API za knjigovođu `GET /export?format=csv`).
  * Format za Excel u srpskom okruženju: UTF-8 sa BOM-om, razdvajač `;`, decimalni zarez, redovi CRLF.
- * Poslednja kolona „Izvor": „QR" (račun iz QR koda) ili „PFR broj" (unet po PFR broju, link je stranica /verify).
+ * Kolona „Izvor": „QR" (račun iz QR koda) ili „PFR broj" (unet po PFR broju, link je stranica /verify); poslednje dve
+ * kolone „Brojač" (npr. `123/456`) i „Nastavak" (npr. `ПП`) su prazne ako ih aplikacija nije poslala.
  */
 final class ReceiptCsv
 {
@@ -20,7 +21,7 @@ final class ReceiptCsv
     public const MAX_ROWS = 50000;
 
     public const COLUMNS = ['Datum', 'Prodavac', 'PIB prodavca', 'PIB kupca', 'Iznos', 'PFR broj', 'Vrsta računa',
-        'Vrsta transakcije', 'Link za proveru', 'Izvor'];
+        'Vrsta transakcije', 'Link za proveru', 'Izvor', 'Brojač', 'Nastavak'];
 
     /**
      * CSV od računa. Ako je dat `$clientNames` (clientId => naziv), dodaje se prva kolona „Korisnik" — za izvoz više
@@ -51,6 +52,8 @@ final class ReceiptCsv
                 self::safeCell(Format::transactionType($r->transactionType)),
                 self::safeCell($r->verificationUrl),
                 Format::receiptSource($r->source),
+                self::safeCell((string) $r->invoiceCounter),
+                self::safeCell((string) $r->invoiceCounterExtension),
             ];
             if ($clientNames !== null) {
                 array_unshift($fields, self::safeCell($clientNames[$r->clientId] ?? ''));

@@ -57,8 +57,15 @@ curl -s https://domen.rs/panel/u/0f3c…/receipts \
 | `sellerName` | ne | tekst do 200 znakova ili `null` |
 | `sellerPib`, `buyerPib` | ne | tačno 9 cifara (kao string) ili `null` |
 | `invoiceType`, `transactionType` | ne | tekst do 200 znakova ili `null` (npr. `Normal`, `Sale`) |
+| `invoiceCounter` | ne | brojač računa `transactionTypeCounter/totalCounter`, oblik `^\d{1,10}/\d{1,10}$` (npr. `"123/456"`), ili `null` |
+| `invoiceCounterExtension` | ne | nastavak brojača: 1–4 velika slova, ćirilica ili latinica (npr. `"ПП"`, `"ПР"`, `"КП"`), ili `null` |
 
 Nepoznata polja se ignorišu. Mesec u panelu se određuje po `sdcDateTime`.
+
+`invoiceCounter` i `invoiceCounterExtension` aplikacija šalje za sve račune (i `qr` i `pfr`): uz PFR broj, PFR vreme i
+iznos to su podaci koje traži zvanična stranica za proveru `https://suf.purs.gov.rs/verify`. Polje koje nedostaje, `null`
+ili prazan tekst se čuva kao `null`; neispravna vrednost odbija račun razlogom koji počinje imenom polja (npr.
+`invoiceCounter: očekuje se brojač oblika N/N (npr. 123/456) ili null`).
 
 ### Računi uneti po PFR broju (`source: "pfr"`)
 Račun koji korisnik u aplikaciji unese po PFR broju (bez QR koda) nema link sa stavkama, pa aplikacija šalje
@@ -68,12 +75,16 @@ se odbija razlogom `source: dozvoljeno je "qr" ili "pfr"`.
 ```json
 {"invoiceNumber":"RCVG4AFL-RCVG4AFL-234120","source":"pfr","verificationUrl":"https://suf.purs.gov.rs/verify",
  "sdcDateTime":"2026-10-24T21:42:31","totalAmountMinor":123456,"sellerName":"ZORA MARKET DOO","sellerPib":"100000000",
- "buyerPib":"101234567","invoiceType":"Normal","transactionType":"Sale"}
+ "buyerPib":"101234567","invoiceType":"Normal","transactionType":"Sale","invoiceCounter":"123/456",
+ "invoiceCounterExtension":"ПП"}
 ```
+U panelu se uz takav račun prikazuje blok **Podaci za proveru** (PFR broj, brojač sa nastavkom, PFR vreme u obliku
+`24.10.2026. 21:42`, iznos `1.234,56`) sa dugmetom za kopiranje svakog podatka.
 
 **Nadogradnja zapisa (pfr → qr):** ako panel već ima račun tog korisnika sa istim `invoiceNumber` i `source = pfr`, a stigne
 isti račun sa `source = qr` (ili bez polja) i pravim linkom koji počinje sa `https://suf.purs.gov.rs/v/?vl=`, panel ažurira
-postojeći zapis (`verificationUrl`, `source`, sirovi JSON i ostala polja iz nove stavke; vreme prijema ostaje prvobitno) i
+postojeći zapis (`verificationUrl`, `source`, sirovi JSON i ostala polja iz nove stavke; vreme prijema ostaje prvobitno;
+`invoiceCounter` i `invoiceCounterExtension` se zamenjuju samo ako ih nova stavka ima, inače ostaju sačuvani) i
 vraća ga u `accepted`. Svi drugi ponovljeni računi (qr → qr, pfr → pfr, qr → pfr, pfr → qr bez linka `…/v/?vl=…`) idu u
 `duplicates` kao i ranije.
 
@@ -157,14 +168,16 @@ Račun u JSON-u:
 ```json
 {"id":345,"clientId":12,"invoiceNumber":"RCVG4AFL-RCVG4AFL-234120","verificationUrl":"https://suf.purs.gov.rs/v/?vl=A1JD…",
  "sdcDateTime":"2026-10-24T21:42:31","totalAmountMinor":123456,"sellerName":"ZORA MARKET DOO","sellerPib":"100000000",
- "buyerPib":"101234567","invoiceType":"Normal","transactionType":"Sale","source":"qr","receivedAt":"2026-10-24T19:45:02Z"}
+ "buyerPib":"101234567","invoiceType":"Normal","transactionType":"Sale","source":"qr","invoiceCounter":"123/456",
+ "invoiceCounterExtension":"ПП","receivedAt":"2026-10-24T19:45:02Z"}
 ```
 `source`: `qr` — račun iz QR koda; `pfr` — račun unet po PFR broju (`verificationUrl` je tada
 `https://suf.purs.gov.rs/verify`; kad isti račun kasnije stigne iz QR koda, zapis se nadograđuje u `qr`).
+`invoiceCounter` (npr. `"123/456"`) i `invoiceCounterExtension` (npr. `"ПП"`) su `null` ako ih aplikacija nije poslala.
 
 CSV izvoz je isti kao **Preuzmi CSV** u panelu: UTF-8 sa BOM-om, razdvajač `;`, decimalni zarez, redovi CRLF, kolone
 Datum; Prodavac; PIB prodavca; PIB kupca; Iznos; PFR broj; Vrsta računa; Vrsta transakcije; Link za proveru; Izvor
-(`QR` ili `PFR broj`). Izvoz bez `clientId` ima i prvu kolonu **Korisnik**. Tekst koji počinje znakom formule (`=`, `+`,
+(`QR` ili `PFR broj`); Brojač; Nastavak (prazno ako ih nema). Izvoz bez `clientId` ima i prvu kolonu **Korisnik**. Tekst koji počinje znakom formule (`=`, `+`,
 `-`, `@`) dobija apostrof ispred.
 Izvoz ima najviše 50000 računa (inače 413 `export_too_large` — izvezite korisnike pojedinačno) i upisuje se u dnevnik
 radnji (`api.accountant_export`).

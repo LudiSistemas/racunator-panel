@@ -18,6 +18,8 @@ final class InMemoryReceiptRepository implements ReceiptRepository
         $source = ($data['source'] ?? Receipt::SOURCE_QR) === Receipt::SOURCE_PFR ? Receipt::SOURCE_PFR : Receipt::SOURCE_QR;
         $id = null;
         $receivedAt = gmdate('Y-m-d H:i:s');
+        $counter = $data['invoiceCounter'] ?? null;
+        $extension = $data['invoiceCounterExtension'] ?? null;
         foreach ($this->receipts as $r) {
             if ($r->clientId === $clientId && $r->invoiceNumber === $data['invoiceNumber']) {
                 // Isto pravilo nadogradnje kao u jezgru: pfr → qr sa pravim linkom iz QR koda.
@@ -28,6 +30,8 @@ final class InMemoryReceiptRepository implements ReceiptRepository
                 }
                 $id = $r->id;
                 $receivedAt = $r->receivedAt;
+                $counter ??= $r->invoiceCounter;
+                $extension ??= $r->invoiceCounterExtension;
                 break;
             }
         }
@@ -46,6 +50,8 @@ final class InMemoryReceiptRepository implements ReceiptRepository
             $data['transactionType'] ?? null,
             $receivedAt,
             $source,
+            $counter,
+            $extension,
         );
         return true;
     }

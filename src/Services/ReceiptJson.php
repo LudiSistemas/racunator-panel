@@ -30,6 +30,8 @@ final class ReceiptJson
             'invoiceType' => $r->invoiceType,
             'transactionType' => $r->transactionType,
             'source' => $r->source,
+            'invoiceCounter' => $r->invoiceCounter,
+            'invoiceCounterExtension' => $r->invoiceCounterExtension,
             'receivedAt' => self::utc($r->receivedAt),
         ];
     }

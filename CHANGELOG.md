@@ -2,6 +2,17 @@
 
 ## Neobjavljeno
 
+### Podaci za proveru računa na stranici Poreske uprave
+- API za aplikaciju: nova opciona polja računa `invoiceCounter` (brojač `N/N`, npr. `123/456`) i
+  `invoiceCounterExtension` (nastavak brojača, 1–4 velika slova ćirilicom ili latinicom, npr. `ПП`); neispravna vrednost
+  odbija račun sa jasnim razlogom, nedostaje/`null` → prazno. Pri nadogradnji pfr → qr brojač se zamenjuje samo ako ga
+  nova stavka ima.
+- Migracija baze `0005_receipt_invoice_counter` (kolone `receipts.invoice_counter`, `receipts.invoice_counter_extension`).
+- Pregled računa: uz račun unet po PFR broju blok „Podaci za proveru" — PFR broj, brojač sa nastavkom, PFR vreme
+  (`20.10.2026. 15:51`) i iznos (`6.270,00`), svaki sa dugmetom za kopiranje.
+- CSV (panel i API za knjigovođu): nove poslednje kolone „Brojač" i „Nastavak"; JSON računa API-ja za knjigovođu: polja
+  `invoiceCounter` i `invoiceCounterExtension`.
+
 ### API za knjigovođu
 - Read-only API na `/api/<slug>/v1` za knjigovodstvene programe: `ping`, lista korisnika, računi korisnika po mesecu sa
   stranicama, jedan račun (opciono sa izvornim JSON-om), izvoz meseca u CSV (isti format kao u panelu) ili JSON.
@@ -9,7 +20,7 @@
   minutu; privremena blokada adrese posle 10 promašaja ključa u 15 minuta; promašaji i izvozi u dnevniku radnji.
 - Stranica **Podešavanja → API za knjigovođu** sada ima dokumentaciju, `curl` primere i preuzimanje `openapi.yaml`.
 - Dokumentacija: odeljak „API za knjigovođu" u `docs/api.md`, nove putanje u `docs/openapi.yaml`.
-- CSV izvoz računa izdvojen u zajednički kod za panel i API; i API izvoz ima poslednju kolonu „Izvor" (QR / PFR broj),
+- CSV izvoz računa izdvojen u zajednički kod za panel i API; i API izvoz ima kolonu „Izvor" (QR / PFR broj),
   a JSON računa polje `source` (`qr` | `pfr`).
 - `docs/openapi.yaml` opisuje oba API-ja; ispravljena šema računa API-ja za aplikaciju (uslov za `source: pfr` je bio
   umetnut usred `properties`, pa polja od `sdcDateTime` nadalje nisu bila opisana).

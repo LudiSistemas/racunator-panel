@@ -166,6 +166,14 @@ form.inline { display: inline; }
 /* Oznaka računa unetog po PFR broju (bez QR koda) */
 .table td.pfr .badge { font-family: var(--font); margin-left: .35rem; }
 .table .actions .btn + .btn { margin-left: .25rem; }
+/* Podaci za proveru računa unetog po PFR broju (stranica /verify) */
+.verify-data { white-space: normal; text-align: left; margin-top: .5rem; min-width: 260px; font-size: .88rem; }
+.verify-data .verify-title { margin: 0 0 .25rem; font-weight: 600; }
+.verify-data dl { display: grid; grid-template-columns: auto 1fr; gap: .25rem .75rem; margin: 0; align-items: center; }
+.verify-data dt { color: var(--muted); }
+.verify-data dd { margin: 0; }
+.verify-data code { font-family: var(--mono); white-space: nowrap; margin-right: .35rem; }
+.verify-data .btn-small { margin: 0 .25rem 0 0; }
 .inline-details[open] { display: block; text-align: left; margin-top: .5rem; min-width: 260px; }
 .inline-details[open] .form { margin-top: .5rem; }
 

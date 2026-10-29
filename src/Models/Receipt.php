@@ -8,6 +8,9 @@ namespace RacunatorPanel\Models;
  * (`2026-10-24T21:42:31`, lokalno vreme PFR-a). `verificationUrl` je link ka suf.purs.gov.rs.
  * `source`: `qr` — račun iz QR koda (link `…/v/?vl=…` otvara račun sa stavkama); `pfr` — račun unet po PFR broju
  * (link je zvanična stranica `https://suf.purs.gov.rs/verify` na kojoj se ukuca PFR broj).
+ * `invoiceCounter` (brojač `transactionTypeCounter/totalCounter`, npr. `123/456`) i `invoiceCounterExtension` (nastavak
+ * brojača, npr. `ПП`) — podaci koje zvanična stranica za proveru traži uz PFR broj, vreme i iznos; null ako ih aplikacija
+ * nije poslala.
  */
 final class Receipt
 {
@@ -32,6 +35,8 @@ final class Receipt
         public readonly ?string $transactionType,
         public readonly string $receivedAt,
         public readonly string $source = self::SOURCE_QR,
+        public readonly ?string $invoiceCounter = null,
+        public readonly ?string $invoiceCounterExtension = null,
     ) {
     }
 

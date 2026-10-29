@@ -216,9 +216,12 @@ final class AccountantApiTest extends TestCase
         $first = $d['items'][0];
         self::assertSame([
             'id', 'clientId', 'invoiceNumber', 'verificationUrl', 'sdcDateTime', 'totalAmountMinor', 'sellerName',
-            'sellerPib', 'buyerPib', 'invoiceType', 'transactionType', 'source', 'receivedAt',
+            'sellerPib', 'buyerPib', 'invoiceType', 'transactionType', 'source', 'invoiceCounter',
+            'invoiceCounterExtension', 'receivedAt',
         ], array_keys($first));
         self::assertSame('qr', $first['source']);
+        self::assertNull($first['invoiceCounter']);
+        self::assertNull($first['invoiceCounterExtension']);
         self::assertSame('2026-10-03T10:00:00', $first['sdcDateTime']);
         self::assertSame(300, $first['totalAmountMinor']);
         self::assertSame($this->pera->id, $first['clientId']);
@@ -300,21 +303,28 @@ final class AccountantApiTest extends TestCase
     {
         $this->addReceipt($this->pera, 'AAAAAAAA-BBBBBBBB-1', '2026-10-01T08:00:00');
         $this->addReceipt($this->pera, 'AAAAAAAA-BBBBBBBB-2', '2026-10-02T08:00:00', 5000,
-            ['source' => 'pfr', 'verificationUrl' => 'https://suf.purs.gov.rs/verify']);
+            ['source' => 'pfr', 'verificationUrl' => 'https://suf.purs.gov.rs/verify', 'invoiceCounter' => '123/456',
+                'invoiceCounterExtension' => 'ПП']);
         $items = self::data($this->call('/clients/' . $this->pera->id . '/receipts', ['month' => '2026-10']))['items'];
         self::assertSame(['qr', 'pfr'], array_column($items, 'source'));
-        self::assertSame('pfr', self::data($this->call('/receipts/' . $items[1]['id']))['source']);
+        self::assertSame([null, '123/456'], array_column($items, 'invoiceCounter'));
+        self::assertSame([null, 'ПП'], array_column($items, 'invoiceCounterExtension'));
+        $one = self::data($this->call('/receipts/' . $items[1]['id']));
+        self::assertSame(['pfr', '123/456', 'ПП'], [$one['source'], $one['invoiceCounter'], $one['invoiceCounterExtension']]);
+        self::assertStringContainsString('"invoiceCounterExtension":"ПП"', $this->call('/receipts/' . $items[1]['id'])->body);
         $json = self::data($this->call('/export', ['month' => '2026-10', 'format' => 'json']));
         self::assertSame(['qr', 'pfr'], array_column($json, 'source'));
+        self::assertSame([null, '123/456'], array_column($json, 'invoiceCounter'));
 
         $csv = $this->call('/export', ['month' => '2026-10', 'format' => 'csv', 'clientId' => (string) $this->pera->id])->body;
         $lines = explode("\r\n", rtrim(substr($csv, 3), "\r\n"));
-        self::assertStringEndsWith(';"Link za proveru";Izvor', $lines[0]);
-        self::assertStringEndsWith(';QR', $lines[1]);
-        self::assertStringEndsWith(';https://suf.purs.gov.rs/verify;"PFR broj"', $lines[2]);
+        self::assertStringEndsWith(';"Link za proveru";Izvor;Brojač;Nastavak', $lines[0]);
+        self::assertStringEndsWith(';QR;;', $lines[1]);
+        self::assertStringEndsWith(';https://suf.purs.gov.rs/verify;"PFR broj";123/456;ПП', $lines[2]);
         $all = $this->call('/export', ['month' => '2026-10'])->body;
         self::assertStringStartsWith('Korisnik;Datum;', substr($all, 3));
-        self::assertStringContainsString(';"Link za proveru";Izvor' . "\r\n", $all);
+        self::assertStringContainsString(';"Link za proveru";Izvor;Brojač;Nastavak' . "\r\n", $all);
+        self::assertStringContainsString(';"PFR broj";123/456;ПП' . "\r\n", $all);
     }
 
     public function testIzvozCsvJednogKorisnikaKaoUPanelu(): void

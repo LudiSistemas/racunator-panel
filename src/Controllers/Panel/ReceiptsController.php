@@ -69,7 +69,8 @@ final class ReceiptsController extends BaseController
     }
 
     /**
-     * CSV za Excel u srpskom okruženju (zajednički kod: `Services\ReceiptCsv`); poslednja kolona „Izvor" (QR / PFR broj).
+     * CSV za Excel u srpskom okruženju (zajednički kod: `Services\ReceiptCsv`); kolone „Izvor" (QR / PFR broj),
+     * „Brojač" i „Nastavak".
      * @param list<Receipt> $receipts
      */
     public static function buildCsv(array $receipts): string

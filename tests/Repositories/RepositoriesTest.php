@@ -223,6 +223,45 @@ final class RepositoriesTest extends TestCase
         self::assertSame('qr', $repo->forClientMonth($c->id, '2026-10')[1]->source);
     }
 
+    public function testBrojacINastavakUpisCitanjeINadogradnja(): void
+    {
+        $c = (new PdoClientRepository($this->pdo))->create('A', KeyGenerator::slug(), 'p', 'h', null);
+        $repo = new PdoReceiptRepository($this->pdo);
+        $pfr = ['source' => 'pfr', 'verificationUrl' => 'https://suf.purs.gov.rs/verify'];
+        $qr = ['source' => 'qr', 'verificationUrl' => 'https://suf.purs.gov.rs/v/?vl=xyz'];
+
+        // Upis i čitanje; bez polja → null.
+        self::assertTrue($repo->insertIfNew($c->id, ['invoiceCounter' => '123/456', 'invoiceCounterExtension' => 'ПП'] + $pfr
+            + self::receipt('AAAAAAAA-BBBBBBBB-1', '2026-10-01T10:00:00', 1)));
+        self::assertTrue($repo->insertIfNew($c->id, $pfr + self::receipt('AAAAAAAA-BBBBBBBB-2', '2026-10-02T10:00:00', 1)));
+        [$first, $second] = $repo->forClientMonth($c->id, '2026-10');
+        self::assertSame(['123/456', 'ПП'], [$first->invoiceCounter, $first->invoiceCounterExtension]);
+        self::assertSame([null, null], [$second->invoiceCounter, $second->invoiceCounterExtension]);
+        self::assertSame('ПП', $repo->findById($first->id)?->invoiceCounterExtension);
+
+        // Nadogradnja pfr → qr bez brojača čuva sačuvani brojač i nastavak.
+        self::assertTrue($repo->insertIfNew($c->id, $qr + self::receipt('AAAAAAAA-BBBBBBBB-1', '2026-10-01T10:00:00', 1)));
+        $kept = $repo->findById($first->id);
+        self::assertSame(['qr', '123/456', 'ПП'], [$kept?->source, $kept?->invoiceCounter, $kept?->invoiceCounterExtension]);
+
+        // Nadogradnja pfr → qr sa brojačem ga zamenjuje (i popunjava kad ga ranije nije bilo).
+        self::assertTrue($repo->insertIfNew($c->id, ['invoiceCounter' => '7/9', 'invoiceCounterExtension' => 'ПР'] + $qr
+            + self::receipt('AAAAAAAA-BBBBBBBB-2', '2026-10-02T10:00:00', 1)));
+        $filled = $repo->findById($second->id);
+        self::assertSame(['qr', '7/9', 'ПР'], [$filled?->source, $filled?->invoiceCounter, $filled?->invoiceCounterExtension]);
+
+        self::assertTrue($repo->insertIfNew($c->id, ['invoiceCounter' => '1/2', 'invoiceCounterExtension' => 'ПП'] + $pfr
+            + self::receipt('AAAAAAAA-BBBBBBBB-3', '2026-10-03T10:00:00', 1)));
+        self::assertTrue($repo->insertIfNew($c->id, ['invoiceCounter' => '3/4', 'invoiceCounterExtension' => 'КП'] + $qr
+            + self::receipt('AAAAAAAA-BBBBBBBB-3', '2026-10-03T10:00:00', 1)));
+        $replaced = $repo->forClientMonth($c->id, '2026-10')[2];
+        self::assertSame(['3/4', 'КП'], [$replaced->invoiceCounter, $replaced->invoiceCounterExtension]);
+        // Duplikat (qr → qr) ne menja brojač.
+        self::assertFalse($repo->insertIfNew($c->id, ['invoiceCounter' => '5/6'] + $qr
+            + self::receipt('AAAAAAAA-BBBBBBBB-3', '2026-10-03T10:00:00', 1)));
+        self::assertSame('3/4', $repo->findById($replaced->id)?->invoiceCounter);
+    }
+
     public function testDecembarPrelaziGodinu(): void
     {
         $c = (new PdoClientRepository($this->pdo))->create('A', KeyGenerator::slug(), 'p', 'h', null);

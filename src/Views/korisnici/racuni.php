@@ -44,8 +44,36 @@ use function RacunatorPanel\Kernel\e;
       <td class="actions">
         <?php if ($r->isPfrEntry()): ?>
           <a class="btn btn-small" href="<?= e(Receipt::SUF_VERIFY_URL) ?>" target="_blank" rel="noopener noreferrer"
-             title="Na stranici Poreske uprave ukucajte PFR broj <?= e($r->invoiceNumber) ?>">Proveri na sajtu Poreske uprave</a>
-          <button type="button" class="btn btn-small" data-copy="pfr-<?= e($r->id) ?>">Kopiraj PFR broj</button>
+             title="Na stranici Poreske uprave ukucajte podatke za proveru">Proveri na sajtu Poreske uprave</a>
+          <div class="verify-data">
+            <p class="verify-title">Podaci za proveru</p>
+            <dl>
+              <dt>PFR broj</dt>
+              <dd><code><?= e($r->invoiceNumber) ?></code>
+                <button type="button" class="btn btn-small" data-copy="pfr-<?= e($r->id) ?>">Kopiraj PFR broj</button></dd>
+              <dt>Brojač</dt>
+              <dd>
+                <?php if ($r->invoiceCounter === null && $r->invoiceCounterExtension === null): ?>
+                  <span class="muted">— (aplikacija nije poslala)</span>
+                <?php else: ?>
+                  <?php if ($r->invoiceCounter !== null): ?><code id="brojac-<?= e($r->id) ?>"><?= e($r->invoiceCounter) ?></code><?php endif; ?>
+                  <?php if ($r->invoiceCounterExtension !== null): ?><code id="nastavak-<?= e($r->id) ?>"><?= e($r->invoiceCounterExtension) ?></code><?php endif; ?>
+                  <?php if ($r->invoiceCounter !== null): ?>
+                    <button type="button" class="btn btn-small" data-copy="brojac-<?= e($r->id) ?>">Kopiraj brojač</button>
+                  <?php endif; ?>
+                  <?php if ($r->invoiceCounterExtension !== null): ?>
+                    <button type="button" class="btn btn-small" data-copy="nastavak-<?= e($r->id) ?>">Kopiraj nastavak</button>
+                  <?php endif; ?>
+                <?php endif; ?>
+              </dd>
+              <dt>PFR vreme</dt>
+              <dd><code id="vreme-<?= e($r->id) ?>" data-copy-exact><?= e(Format::sdcDateTime($r->sdcDateTime, 'd.m.Y. H:i')) ?></code>
+                <button type="button" class="btn btn-small" data-copy="vreme-<?= e($r->id) ?>">Kopiraj vreme</button></dd>
+              <dt>Iznos</dt>
+              <dd><code id="iznos-<?= e($r->id) ?>"><?= e(Format::amount($r->totalAmountMinor)) ?></code>
+                <button type="button" class="btn btn-small" data-copy="iznos-<?= e($r->id) ?>">Kopiraj iznos</button></dd>
+            </dl>
+          </div>
         <?php elseif (Format::isSufUrl($r->verificationUrl)): ?>
           <a class="btn btn-small" href="<?= e($r->verificationUrl) ?>" target="_blank" rel="noopener noreferrer">Otvori na sajtu Poreske uprave</a>
         <?php else: ?>
@@ -63,6 +91,7 @@ use function RacunatorPanel\Kernel\e;
 <p class="hint">Zbir sabira iznose svih računa u mesecu onako kako su primljeni (uključujući eventualne refundacije, označene bojom).</p>
 <?php if (array_filter($receipts, static fn (Receipt $r): bool => $r->isPfrEntry()) !== []): ?>
 <p class="hint">Račun označen sa „PFR broj" unet je u aplikaciji po PFR broju, bez QR koda: dugme „Proveri na sajtu Poreske uprave"
-  otvara zvaničnu stranicu za proveru, gde se ukuca PFR broj (dugme „Kopiraj PFR broj" ga kopira).</p>
+  otvara zvaničnu stranicu za proveru, gde se ukucaju podaci iz bloka „Podaci za proveru" (PFR broj, brojač i nastavak
+  brojača, PFR vreme i iznos — svaki se kopira svojim dugmetom).</p>
 <?php endif; ?>
 <?php endif; ?>
