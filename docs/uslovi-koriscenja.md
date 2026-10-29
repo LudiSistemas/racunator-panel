@@ -24,7 +24,7 @@ Korišćenjem aplikacije Računator ili instalacijom i korišćenjem Računator 
 ne slažete, nemojte koristiti aplikaciju ni panel.
 
 Aplikacija pri prvom pokretanju, a panel pri instalaciji, traže da izričito prihvatite uslove. Aplikacija nije namenjena
-deci mlađoj od 16 godina.
+deci mlađoj od 18 godina.
 
 ## 2. Šta je Računator
 **Računator (aplikacija)** je besplatna mobilna aplikacija za Android i iPhone. Skenira QR kod sa fiskalnih računa
