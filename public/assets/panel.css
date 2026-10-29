@@ -158,6 +158,9 @@ form.inline { display: inline; }
 .table tr.inactive td { color: var(--muted); }
 .table tr.refund td { background: #fff8f7; }
 .table code { background: none; padding: 0; }
+/* PFR broj računa u jednom redu (globalni `code` inače prelama bilo gde) */
+.table .pfr, .table .pfr code { font-family: var(--mono); white-space: nowrap; word-break: normal; }
+.table td.pfr code { font-size: .86em; }
 .inline-details[open] { display: block; text-align: left; margin-top: .5rem; min-width: 260px; }
 .inline-details[open] .form { margin-top: .5rem; }
 
@@ -167,6 +170,14 @@ form.inline { display: inline; }
 .danger-row:first-of-type { border-top: 0; padding-top: 0; }
 .danger-row > div { flex: 1 1 320px; }
 .danger-row p { margin: .2rem 0 0; }
+
+/* Beleške izdanja na /azuriranje (tekst dolazi kroz nl2br, pa se redovi već prelamaju sa <br>) */
+.changelog {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: .75rem 1rem; margin: .5rem 0 1rem;
+  font-family: var(--mono); font-size: .86rem; line-height: 1.55; color: var(--text);
+  white-space: normal; overflow-wrap: anywhere; max-height: 22rem; overflow-y: auto;
+}
+.changelog p { margin: 0; font-family: var(--font); }
 
 /* QR i kartica za štampu */
 .qr { width: 280px; max-width: 100%; margin: 1rem auto; }
@@ -196,6 +207,7 @@ form.inline { display: inline; }
   .table td[data-label]::before { content: attr(data-label); display: block; font-size: .78rem; color: var(--muted); font-weight: 600; }
   .table .num, .table .actions { text-align: left; }
   .table tfoot th[colspan] { padding: .25rem .75rem; text-align: left; }
+  .table td.pfr code { white-space: normal; overflow-wrap: anywhere; }
   .kv { grid-template-columns: 1fr; gap: .1rem; }
   .kv dd { margin-bottom: .5rem; }
 }

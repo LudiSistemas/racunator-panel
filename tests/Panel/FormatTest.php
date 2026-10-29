@@ -37,4 +37,17 @@ final class FormatTest extends TestCase
         self::assertFalse(Format::isSufUrl('https://suf.purs.gov.rs.zlo.rs/v'));
         self::assertFalse(Format::isSufUrl('http://suf.purs.gov.rs/v'));
     }
+
+    public function testNaziviRadnjiUDnevniku(): void
+    {
+        self::assertSame('Instalacija', Format::auditAction('install'));
+        self::assertSame('Ažuriranje pokrenuto', Format::auditAction('update.run'));
+        self::assertSame('Ažuriranje nije uspelo', Format::auditAction('update.failed'));
+        self::assertSame('Upozorenje pri ažuriranju', Format::auditAction('update.warning'));
+        self::assertSame('Vraćena prethodna verzija', Format::auditAction('update.revert'));
+        self::assertSame('Vraćanje nije uspelo', Format::auditAction('update.revert_failed'));
+        self::assertSame('Isključen režim održavanja', Format::auditAction('update.maintenance_cleared'));
+        self::assertSame('Preuzeta rezervna kopija', Format::auditAction('backup.download'));
+        self::assertSame('nesto.nepoznato', Format::auditAction('nesto.nepoznato'));
+    }
 }

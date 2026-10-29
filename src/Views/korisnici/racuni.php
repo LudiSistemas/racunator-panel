@@ -24,7 +24,7 @@ use function RacunatorPanel\Kernel\e;
 <div class="table-wrap">
 <table class="table receipts">
   <thead>
-    <tr><th>Datum</th><th>Prodavac</th><th>PIB prodavca</th><th>PIB kupca</th><th class="num">Iznos (RSD)</th><th>PFR broj</th><th>Vrsta</th><th></th></tr>
+    <tr><th>Datum</th><th>Prodavac</th><th>PIB prodavca</th><th>PIB kupca</th><th class="num">Iznos (RSD)</th><th class="pfr">PFR broj</th><th>Vrsta</th><th></th></tr>
   </thead>
   <tbody>
   <?php foreach ($receipts as $r): ?>
@@ -34,7 +34,7 @@ use function RacunatorPanel\Kernel\e;
       <td data-label="PIB prodavca"><?= e($r->sellerPib ?? '—') ?></td>
       <td data-label="PIB kupca"><?= e($r->buyerPib ?? '—') ?></td>
       <td data-label="Iznos" class="num"><?= e(Format::amount($r->totalAmountMinor)) ?></td>
-      <td data-label="PFR broj"><code><?= e($r->invoiceNumber) ?></code></td>
+      <td data-label="PFR broj" class="pfr"><code><?= e($r->invoiceNumber) ?></code></td>
       <td data-label="Vrsta"><?= e(Format::receiptKind($r->invoiceType, $r->transactionType)) ?></td>
       <td class="actions">
         <?php if (Format::isSufUrl($r->verificationUrl)): ?>

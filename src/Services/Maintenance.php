@@ -44,11 +44,14 @@ final class Maintenance
         return $until === 0 || $until > ($now ?? time());
     }
 
-    /** Sekunde do kraja (za Retry-After). */
-    public static function retryAfter(string $storage): int
+    /** Sekunde do kraja (za Retry-After); zastavica bez roka (npr. ručno napravljen prazan fajl) → 120. */
+    public static function retryAfter(string $storage, ?int $now = null): int
     {
         $data = json_decode((string) @file_get_contents(self::path($storage)), true);
-        $left = is_array($data) ? (int) ($data['until'] ?? 0) - time() : 0;
-        return max(30, min(300, $left));
+        $until = is_array($data) ? (int) ($data['until'] ?? 0) : 0;
+        if ($until === 0) {
+            return 120;
+        }
+        return max(30, min(300, $until - ($now ?? time())));
     }
 }

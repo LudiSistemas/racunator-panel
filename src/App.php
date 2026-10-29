@@ -28,6 +28,7 @@ use RacunatorPanel\Repositories\PdoUserRepository;
 use RacunatorPanel\Repositories\ReceiptRepository;
 use RacunatorPanel\Repositories\SettingsRepository;
 use RacunatorPanel\Repositories\UserRepository;
+use RacunatorPanel\Services\Maintenance;
 
 /**
  * Sastavljanje aplikacije: konfiguracija, baza, repozitorijumi, prijava, šabloni, ruter i middleware.
@@ -159,10 +160,11 @@ final class App
 
         // 2) Režim održavanja (tokom ažuriranja): 503 + Retry-After.
         $this->router->use(function (Request $r, callable $next): Response {
-            if (!$this->inMaintenance() || self::allowedInMaintenance($r->path)) {
+            $storage = $this->activeMaintenanceStorage();
+            if ($storage === null || self::allowedInMaintenance($r->path)) {
                 return $next($r);
             }
-            $headers = ['Retry-After' => '120', 'Cache-Control' => 'no-store'];
+            $headers = ['Retry-After' => (string) Maintenance::retryAfter($storage), 'Cache-Control' => 'no-store'];
             if (str_starts_with($r->path, '/u/') || str_starts_with($r->path, '/api/')) {
                 return Response::json(
                     ['error' => 'maintenance', 'message' => 'Panel se ažurira. Pokušajte ponovo za nekoliko minuta.'],
@@ -197,14 +199,19 @@ final class App
         $this->router->post('/u/{slug}/receipts', [$api, 'receipts']);
     }
 
-    private function inMaintenance(): bool
+    /**
+     * Direktorijum sa važećom zastavicom održavanja ili null. Rok (`until`) se poštuje preko `Maintenance::isActive()`,
+     * pa zastavica zaostala posle pada procesa usred ažuriranja ne blokira API i panel zauvek.
+     */
+    private function activeMaintenanceStorage(): ?string
     {
         foreach ($this->maintenanceFlags() as $flag) {
-            if (is_file($flag)) {
-                return true;
+            $storage = dirname($flag);
+            if (Maintenance::isActive($storage)) {
+                return $storage;
             }
         }
-        return false;
+        return null;
     }
 
     private static function allowedInMaintenance(string $path): bool

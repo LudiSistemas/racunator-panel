@@ -40,8 +40,14 @@ final class Format
         'api.enable' => 'Uključen API za knjigovođu',
         'api.disable' => 'Isključen API za knjigovođu',
         'api.rotate_key' => 'Nov ključ API-ja za knjigovođu',
-        'update.run' => 'Ažuriranje panela',
-        'update.revert' => 'Povratak na prethodnu verziju',
+        'install' => 'Instalacija',
+        'update.run' => 'Ažuriranje pokrenuto',
+        'update.failed' => 'Ažuriranje nije uspelo',
+        'update.warning' => 'Upozorenje pri ažuriranju',
+        'update.revert' => 'Vraćena prethodna verzija',
+        'update.revert_failed' => 'Vraćanje nije uspelo',
+        'update.maintenance_cleared' => 'Isključen režim održavanja',
+        'backup.download' => 'Preuzeta rezervna kopija',
     ];
 
     /** Iznos u parama → „1.234,56" (sa tačkom za hiljade) ili „1234,56" (za CSV). */
