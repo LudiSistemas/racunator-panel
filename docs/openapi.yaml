@@ -125,12 +125,242 @@ paths:
                         description: Samo uz `daily_limit`.
         "503":
           $ref: "#/components/responses/Odrzavanje"
+  # --- API za knjigovođu (v1, samo čitanje): /api/{slug}/v1/…, ključ knjigovođe iz panela ---
+  /api/{slug}/v1/ping:
+    get:
+      summary: "Knjigovođa: provera ključa"
+      operationId: knjigovodjaPing
+      security:
+        - kljucKnjigovodje: []
+      parameters:
+        - $ref: "#/components/parameters/SlugKnjigovodje"
+      responses:
+        "200":
+          description: Ključ i adresa su ispravni, API je uključen.
+          headers:
+            X-Racunator-Api:
+              $ref: "#/components/headers/ApiVerzija"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnjigovodjaPing"
+              example:
+                ok: true
+                accountant: Knjigovodstvo XY
+                api: 1
+        "401":
+          $ref: "#/components/responses/KnjigovodjaNeovlascen"
+        "429":
+          $ref: "#/components/responses/KnjigovodjaPreviseZahteva"
+        "503":
+          $ref: "#/components/responses/Odrzavanje"
+  /api/{slug}/v1/clients:
+    get:
+      summary: "Knjigovođa: lista korisnika"
+      operationId: knjigovodjaKorisnici
+      security:
+        - kljucKnjigovodje: []
+      parameters:
+        - $ref: "#/components/parameters/SlugKnjigovodje"
+      responses:
+        "200":
+          description: Svi korisnici (aktivni i deaktivirani), po nazivu.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/KnjigovodjaKorisnik"
+              example:
+                items:
+                  - id: 12
+                    name: Pera DOO
+                    active: true
+                    createdAt: "2026-10-01T08:15:00Z"
+                    lastSeenAt: "2026-10-24T19:45:02Z"
+                    receiptsCount: 318
+        "401":
+          $ref: "#/components/responses/KnjigovodjaNeovlascen"
+        "429":
+          $ref: "#/components/responses/KnjigovodjaPreviseZahteva"
+        "503":
+          $ref: "#/components/responses/Odrzavanje"
+  /api/{slug}/v1/clients/{id}/receipts:
+    get:
+      summary: "Knjigovođa: računi korisnika za mesec (po stranicama)"
+      operationId: knjigovodjaRacuniKorisnika
+      security:
+        - kljucKnjigovodje: []
+      parameters:
+        - $ref: "#/components/parameters/SlugKnjigovodje"
+        - name: id
+          in: path
+          required: true
+          description: ID korisnika iz `/clients`.
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/Mesec"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: perPage
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: Stranica računa, po `sdcDateTime` rastuće. Stranica posle poslednje vraća prazan `items`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, month, page, perPage, total]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/KnjigovodjaRacun"
+                  month:
+                    type: string
+                    examples: ["2026-10"]
+                  page:
+                    type: integer
+                  perPage:
+                    type: integer
+                  total:
+                    type: integer
+                    description: Ukupan broj računa korisnika u mesecu.
+        "400":
+          $ref: "#/components/responses/KnjigovodjaLosParametar"
+        "401":
+          $ref: "#/components/responses/KnjigovodjaNeovlascen"
+        "404":
+          $ref: "#/components/responses/KnjigovodjaNijePronadjeno"
+        "429":
+          $ref: "#/components/responses/KnjigovodjaPreviseZahteva"
+        "503":
+          $ref: "#/components/responses/Odrzavanje"
+  /api/{slug}/v1/receipts/{id}:
+    get:
+      summary: "Knjigovođa: jedan račun"
+      operationId: knjigovodjaRacun
+      security:
+        - kljucKnjigovodje: []
+      parameters:
+        - $ref: "#/components/parameters/SlugKnjigovodje"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: raw
+          in: query
+          required: false
+          description: "`1` = dodaj `rawJson` (izvorni JSON koji je aplikacija poslala, ako je sačuvan)."
+          schema:
+            type: string
+            enum: ["1"]
+      responses:
+        "200":
+          description: Račun.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/KnjigovodjaRacun"
+                  - type: object
+                    properties:
+                      rawJson:
+                        type: [string, "null"]
+                        description: Samo uz `?raw=1`; JSON tekst računa kako ga je aplikacija poslala (do 8 KB).
+        "401":
+          $ref: "#/components/responses/KnjigovodjaNeovlascen"
+        "404":
+          $ref: "#/components/responses/KnjigovodjaNijePronadjeno"
+        "429":
+          $ref: "#/components/responses/KnjigovodjaPreviseZahteva"
+        "503":
+          $ref: "#/components/responses/Odrzavanje"
+  /api/{slug}/v1/export:
+    get:
+      summary: "Knjigovođa: izvoz računa za mesec (CSV ili JSON)"
+      operationId: knjigovodjaIzvoz
+      security:
+        - kljucKnjigovodje: []
+      parameters:
+        - $ref: "#/components/parameters/SlugKnjigovodje"
+        - $ref: "#/components/parameters/Mesec"
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [csv, json]
+            default: csv
+        - name: clientId
+          in: query
+          required: false
+          description: Samo jedan korisnik; bez njega svi korisnici (po nazivu, pa po vremenu).
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: >-
+            CSV: UTF-8 sa BOM-om, razdvajač `;`, decimalni zarez, redovi CRLF, iste kolone kao „Preuzmi CSV" u panelu
+            (Datum; Prodavac; PIB prodavca; PIB kupca; Iznos; PFR broj; Vrsta računa; Vrsta transakcije; Link za proveru);
+            bez `clientId` dodaje se prva kolona „Korisnik". JSON: niz računa.
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KnjigovodjaRacun"
+        "400":
+          $ref: "#/components/responses/KnjigovodjaLosParametar"
+        "401":
+          $ref: "#/components/responses/KnjigovodjaNeovlascen"
+        "404":
+          $ref: "#/components/responses/KnjigovodjaNijePronadjeno"
+        "413":
+          description: Izvoz bi imao više od 50000 računa (`export_too_large`) — izvezite korisnike pojedinačno.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnjigovodjaGreska"
+        "429":
+          $ref: "#/components/responses/KnjigovodjaPreviseZahteva"
+        "503":
+          $ref: "#/components/responses/Odrzavanje"
 components:
   securitySchemes:
     kljucKorisnika:
       type: http
       scheme: bearer
       description: API ključ korisnika iz QR koda (`rk_` + 43 znaka base64url).
+    kljucKnjigovodje:
+      type: http
+      scheme: bearer
+      description: >-
+        Ključ API-ja za knjigovođu (`rk_` + 43 znaka base64url) iz panela, Podešavanja → API za knjigovođu; prikazuje se
+        samo pri uključivanju i pri „Nov ključ".
   parameters:
     Slug:
       name: slug
@@ -147,6 +377,22 @@ components:
       schema:
         type: string
         const: "1"
+    SlugKnjigovodje:
+      name: slug
+      in: path
+      required: true
+      description: Nasumični deo adrese API-ja za knjigovođu (32 heksadecimalna znaka) iz panela.
+      schema:
+        type: string
+        pattern: "^[0-9a-f]{32}$"
+    Mesec:
+      name: month
+      in: query
+      required: true
+      description: Mesec po vremenu sa računa (`sdcDateTime`), oblik `YYYY-MM`.
+      schema:
+        type: string
+        pattern: "^(19|20|21)\\d{2}-(0[1-9]|1[0-2])$"
   headers:
     ApiVerzija:
       description: Verzija API-ja.
@@ -189,6 +435,45 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Greska"
+    KnjigovodjaNeovlascen:
+      description: API isključen, pogrešan slug ili pogrešan ključ (isti odgovor u svim slučajevima).
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            const: Bearer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/KnjigovodjaGreska"
+          example:
+            error: unauthorized
+            message: Neispravan ključ ili adresa API-ja.
+    KnjigovodjaPreviseZahteva:
+      description: >-
+        Više od 120 zahteva u minutu (`rate_limited`) ili je adresa privremeno blokirana posle 10 promašaja ključa u
+        15 minuta (`auth_blocked`).
+      headers:
+        Retry-After:
+          description: Broj sekundi do sledećeg pokušaja.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/KnjigovodjaGreska"
+    KnjigovodjaLosParametar:
+      description: Neispravan parametar upita (`invalid_parameter`), npr. `month` nedostaje ili nije `YYYY-MM`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/KnjigovodjaGreska"
+    KnjigovodjaNijePronadjeno:
+      description: Korisnik ili račun ne postoji (`not_found`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/KnjigovodjaGreska"
   schemas:
     Ping:
       type: object
@@ -282,6 +567,87 @@ components:
           enum: [invalid_body, unauthorized, payload_too_large, too_many_receipts, rate_limited, daily_limit, maintenance]
         message:
           type: string
-
-# TODO (faza C): API za knjigovođu — base `/api/{slug}/v1`, poseban ključ, read-only:
-#   GET /clients, GET /clients/{id}/receipts?month=YYYY-MM&page=, GET /receipts/{id}, GET /export?month=&format=csv|json
+    KnjigovodjaPing:
+      type: object
+      required: [ok, accountant, api]
+      properties:
+        ok:
+          type: boolean
+          const: true
+        accountant:
+          type: string
+          description: Naziv knjigovodstva.
+        api:
+          type: integer
+          const: 1
+    KnjigovodjaKorisnik:
+      type: object
+      required: [id, name, active, createdAt, lastSeenAt, receiptsCount]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        active:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+          description: UTC, npr. `2026-10-01T08:15:00Z`.
+        lastSeenAt:
+          type: [string, "null"]
+          format: date-time
+          description: Poslednje javljanje aplikacije (UTC) ili `null`.
+        receiptsCount:
+          type: integer
+          description: Ukupan broj računa korisnika.
+    KnjigovodjaRacun:
+      type: object
+      required: [id, clientId, invoiceNumber, verificationUrl, sdcDateTime, totalAmountMinor, sellerName, sellerPib,
+        buyerPib, invoiceType, transactionType, receivedAt]
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        invoiceNumber:
+          type: string
+          description: PFR broj računa.
+        verificationUrl:
+          type: string
+          format: uri
+          description: Link za proveru na sajtu Poreske uprave.
+        sdcDateTime:
+          type: string
+          description: Vreme sa računa — lokalno (zidno) vreme PFR-a, `YYYY-MM-DDTHH:MM:SS`, bez zone.
+          examples: ["2026-10-24T21:42:31"]
+        totalAmountMinor:
+          type: integer
+          description: Ukupan iznos u parama.
+        sellerName:
+          type: [string, "null"]
+        sellerPib:
+          type: [string, "null"]
+        buyerPib:
+          type: [string, "null"]
+        invoiceType:
+          type: [string, "null"]
+          description: Npr. `Normal`, `Advance`.
+        transactionType:
+          type: [string, "null"]
+          description: Npr. `Sale`, `Refund`.
+        receivedAt:
+          type: string
+          format: date-time
+          description: Vreme prijema u panelu, UTC (`…Z`).
+    KnjigovodjaGreska:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: [unauthorized, auth_blocked, rate_limited, invalid_parameter, not_found, export_too_large,
+            method_not_allowed, maintenance]
+        message:
+          type: string
+          description: Opis na srpskom.

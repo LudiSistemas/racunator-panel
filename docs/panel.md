@@ -98,7 +98,9 @@ klikne **Resetuj 2FA** za vaš nalog; prijavite se lozinkom i odmah ponovo uklju
 ## API za knjigovođu (samo administrator)
 **Podešavanja → API za knjigovođu** sadrži prekidač **Uključi API za knjigovođu**. Pri uključivanju dobijate nasumičnu
 osnovnu adresu i ključ (ključ se prikazuje samo jednom). **Nov ključ** poništava stari, **Isključi API** ga gasi.
-Sam API (čitanje korisnika i računa iz knjigovodstvenog programa) dolazi u narednoj verziji; opis je u [api.md](api.md).
+Na istoj stranici su osnovna adresa, prefiks ključa, lista poziva (korisnici, računi po mesecu, jedan račun, izvoz CSV/JSON),
+primeri `curl` i dugme **Preuzmi OpenAPI opis** (`openapi.yaml`, za integratore; preuzimanje je dostupno svakom prijavljenom
+nalogu). API samo čita podatke; promašaji ključa i izvozi se vide u dnevniku radnji. Detalji: [api.md](api.md#api-za-knjigovođu-v1-samo-čitanje).
 
 ## Dnevnik radnji
 **Dnevnik** prikazuje poslednjih 200 radnji: prijave i odjave, dodavanje i izmene korisnika, nove ključeve, deaktivacije,
