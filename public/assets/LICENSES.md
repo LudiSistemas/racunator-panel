@@ -8,6 +8,8 @@
 - Izvor fajla: `https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js` — jsDelivr-ova Terser minifikacija
   originalnog `qrcode.js` iz istog paketa. Originalni `https://unpkg.com/qrcode-generator@1.4.4/qrcode.js` ima
   SHA-256 (base64) `GK45n4EYK8nekW6cd7GV3yDMWNby1VpisIWimfG/F4A=` (isti kao `integrity` u npm metapodacima).
+- SHA-256 isporučenog fajla `qrcode.min.js` (hex): `c1d86b4eace0126ede148e42b25ca5f51da766cf090054475d3ae2d27165694c`
+  (provera: `shasum -a 256 public/assets/qrcode.min.js`; pri zameni biblioteke upišite novi heš).
 - Izmene: na početak je dodat komentar sa autorskim pravima i licencom (minifikacija ga uklanja), a uklonjen je
   završni red `//# sourceMappingURL=…` (mapa ne postoji lokalno). Kod biblioteke nije menjan.
 - Napomena: „QR Code" je registrovani zaštitni znak kompanije DENSO WAVE INCORPORATED.

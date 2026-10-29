@@ -5,6 +5,8 @@ namespace RacunatorPanel\Tests\Panel;
 
 use RacunatorPanel\Models\User;
 
+use function RacunatorPanel\Kernel\e;
+
 final class PanelRoutesTest extends PanelTestCase
 {
     public function testSveRuteSuRegistrovane(): void
@@ -19,8 +21,8 @@ final class PanelRoutesTest extends PanelTestCase
             self::assertSame(200, $status, "GET $path");
         }
         $posts = ['/korisnici/novi', '/korisnici/1', '/korisnici/1/novi-kljuc', '/korisnici/1/deaktiviraj', '/korisnici/1/aktiviraj',
-            '/nalozi/novi', '/nalozi/1/deaktiviraj', '/nalozi/1/aktiviraj', '/nalozi/1/lozinka', '/podesavanja',
-            '/podesavanja/lozinka', '/podesavanja/2fa', '/podesavanja/api', '/odjava', '/prijava'];
+            '/nalozi/novi', '/nalozi/1/deaktiviraj', '/nalozi/1/aktiviraj', '/nalozi/1/lozinka', '/nalozi/1/resetuj-2fa', '/podesavanja',
+            '/podesavanja/lozinka', '/podesavanja/2fa', '/podesavanja/odjava-svuda', '/podesavanja/api', '/odjava', '/prijava'];
         foreach ($posts as $path) {
             // Bez CSRF tokena svaka POST ruta postoji i odbija zahtev sa 403.
             self::assertSame(403, $this->post($path, [], false)->status, "POST $path");
@@ -37,14 +39,16 @@ final class PanelRoutesTest extends PanelTestCase
         self::assertSame([], $this->clients->all());
     }
 
-    public function testStranicaPrijaveImaPoljeZaKod(): void
+    public function testStranicaPrijave(): void
     {
         $response = $this->get('/prijava');
         self::assertSame(200, $response->status);
-        self::assertStringContainsString('name="kod"', $response->body);
+        self::assertStringContainsString('name="lozinka"', $response->body);
+        self::assertStringNotContainsString('name="kod"', $response->body, 'kod se unosi tek u drugom koraku');
         self::assertStringContainsString('name="_token" value="test-csrf-token"', $response->body);
         self::assertStringContainsString('/panel/assets/panel.css', $response->body);
         self::assertStringNotContainsString('Odjava', $response->body);
+        self::assertStringNotContainsString('0.1.0', $response->body, 'neprijavljen ne vidi verziju');
     }
 
     public function testPrijavaIOdjava(): void
@@ -64,22 +68,62 @@ final class PanelRoutesTest extends PanelTestCase
         self::assertStringContainsString('Odjavljeni ste.', $this->get('/prijava')->body);
     }
 
-    public function testPrijavaSaDvofaktorskomTraziKod(): void
+    public function testPrijavaSaDvofaktorskomUDvaKoraka(): void
     {
         $user = $this->makeUser('maja', User::ROLE_STAFF);
         $secret = \RacunatorPanel\Auth\Totp::generateSecret();
         $this->users->updateTotpSecret($user->id, $secret);
-        self::assertStringNotContainsString('class="totp-field" open', $this->get('/prijava')->body);
 
+        // 1. korak: posle lozinke samo polje za kod (bez polja za lozinku).
         $first = $this->post('/prijava', ['korisnicko_ime' => 'maja', 'lozinka' => self::PASSWORD]);
-        self::assertSame(422, $first->status);
-        self::assertStringContainsString(\RacunatorPanel\Auth\SessionGuard::NEEDS_TOTP, $first->body);
-        self::assertStringContainsString('<details class="totp-field" open>', $first->body);
+        self::assertSame(200, $first->status);
+        self::assertStringContainsString('name="korak" value="kod"', $first->body);
+        self::assertStringContainsString('name="kod"', $first->body);
+        self::assertStringNotContainsString('name="lozinka"', $first->body);
+        self::assertStringContainsString('<strong>maja</strong>', $first->body);
         self::assertNull($this->guard->user());
+        // Osvežavanje stranice zadržava drugi korak.
+        self::assertStringContainsString('name="korak" value="kod"', $this->get('/prijava')->body);
 
-        $ok = $this->post('/prijava', ['korisnicko_ime' => 'maja', 'lozinka' => self::PASSWORD,
-            'kod' => \RacunatorPanel\Auth\Totp::code($secret)]);
+        // Neispravan unos (nije 6 cifara) ostaje na koraku za kod.
+        $short = $this->post('/prijava', ['korak' => 'kod', 'kod' => '12']);
+        self::assertSame(422, $short->status);
+        self::assertStringContainsString('name="korak" value="kod"', $short->body);
+
+        // 2. korak: tačan kod.
+        $ok = $this->post('/prijava', ['korak' => 'kod', 'kod' => \RacunatorPanel\Auth\Totp::code($secret)]);
         $this->assertRedirect($ok, '/panel/');
+        self::assertSame($user->id, $this->guard->user()?->id);
+    }
+
+    public function testPogresnaLozinkaSaDvofaktorskomVodiNaKodPaNaGresku(): void
+    {
+        $user = $this->makeUser('maja', User::ROLE_STAFF);
+        $secret = \RacunatorPanel\Auth\Totp::generateSecret();
+        $this->users->updateTotpSecret($user->id, $secret);
+
+        $first = $this->post('/prijava', ['korisnicko_ime' => 'maja', 'lozinka' => 'pogresna-lozinka-xx']);
+        self::assertSame(200, $first->status, 'prvi korak ne otkriva da li je lozinka tačna');
+        self::assertStringContainsString('name="korak" value="kod"', $first->body);
+
+        $bad = $this->post('/prijava', ['korak' => 'kod', 'kod' => \RacunatorPanel\Auth\Totp::code($secret)]);
+        self::assertSame(422, $bad->status);
+        self::assertStringContainsString(e(\RacunatorPanel\Auth\SessionGuard::BAD_TOTP), $bad->body);
+        self::assertStringContainsString('name="lozinka"', $bad->body, 'nazad na prvi korak');
+        self::assertNull($this->guard->user());
+    }
+
+    public function testNazadIzKorakaZaKodIIstekao(): void
+    {
+        $user = $this->makeUser('maja', User::ROLE_STAFF);
+        $this->users->updateTotpSecret($user->id, \RacunatorPanel\Auth\Totp::generateSecret());
+        $this->post('/prijava', ['korisnicko_ime' => 'maja', 'lozinka' => self::PASSWORD]);
+        $this->assertRedirect($this->post('/prijava', ['radnja' => 'nazad']), '/panel/prijava');
+        self::assertStringContainsString('name="lozinka"', $this->get('/prijava')->body);
+
+        $expired = $this->post('/prijava', ['korak' => 'kod', 'kod' => '123456']);
+        self::assertSame(422, $expired->status);
+        self::assertStringContainsString(e(\RacunatorPanel\Auth\SessionGuard::PENDING_EXPIRED), $expired->body);
     }
 
     public function testZaposleniNeMozeNaAdminEkrane(): void
@@ -111,7 +155,7 @@ final class PanelRoutesTest extends PanelTestCase
             self::assertStringContainsString('href="' . $href . '"', $body);
         }
         self::assertStringContainsString('action="/panel/odjava"', $body);
-        self::assertStringContainsString('verzija 0.1.0', $body);
+        self::assertStringContainsString('verzija 0.1.0', $body, 'prijavljen vidi verziju u podnožju');
     }
 
     public function testDeaktiviranNalogJeOdjavljen(): void

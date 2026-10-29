@@ -64,6 +64,14 @@ final class InMemoryUserRepository implements UserRepository
         $this->replace($id, ['lastLoginAt' => gmdate('Y-m-d H:i:s')]);
     }
 
+    public function bumpSessionVersion(int $id): void
+    {
+        $u = $this->users[$id] ?? null;
+        if ($u !== null) {
+            $this->replace($id, ['sessionVersion' => $u->sessionVersion + 1]);
+        }
+    }
+
     /** @param array<string,mixed> $changes */
     private function replace(int $id, array $changes): void
     {
@@ -74,8 +82,9 @@ final class InMemoryUserRepository implements UserRepository
         $v = $changes + [
             'username' => $u->username, 'passwordHash' => $u->passwordHash, 'role' => $u->role, 'totpSecret' => $u->totpSecret,
             'active' => $u->active, 'createdBy' => $u->createdBy, 'createdAt' => $u->createdAt, 'lastLoginAt' => $u->lastLoginAt,
+            'sessionVersion' => $u->sessionVersion,
         ];
         $this->users[$id] = new User($id, $v['username'], $v['passwordHash'], $v['role'], $v['totpSecret'], $v['active'],
-            $v['createdBy'], $v['createdAt'], $v['lastLoginAt']);
+            $v['createdBy'], $v['createdAt'], $v['lastLoginAt'], $v['sessionVersion']);
     }
 }

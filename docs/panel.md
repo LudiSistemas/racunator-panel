@@ -13,15 +13,19 @@ izvoz u CSV, naloge za zaposlene i dvofaktorsku prijavu. Instalacija je opisana 
 ## Prijava
 1. Otvorite adresu panela (npr. `https://vas-domen.rs/panel`).
 2. Upišite korisničko ime i lozinku i kliknite **Prijavi se**.
-3. Ako ste uključili dvofaktorsku prijavu, otvorite **Imam uključenu dvofaktorsku prijavu** i upišite šestocifreni kod iz
-   aplikacije za autentifikaciju. Ako to zaboravite, panel će vas pitati za kod — tada ponovo upišite lozinku i kod.
-4. Posle više pogrešnih pokušaja prijava se privremeno zaključava (zaštita od pogađanja lozinke). Sačekajte nekoliko minuta.
+3. Ako ste uključili dvofaktorsku prijavu, otvara se druga stranica samo sa poljem za kod: upišite šestocifreni kod iz
+   aplikacije za autentifikaciju i kliknite **Potvrdi** (rok je 5 minuta). Da li je lozinka bila tačna, panel kaže tek
+   posle koda — poruka „Pogrešna lozinka ili kod" znači da je nešto od to dvoje pogrešno; prijavite se ponovo.
+   **Nazad (drugi nalog)** vraća na prvi korak.
+4. Posle više pogrešnih pokušaja prijava se privremeno zaključava (zaštita od pogađanja lozinke): od jednog minuta do
+   pola sata, zavisno od broja pokušaja. Sačekajte i pokušajte ponovo.
 
-Sesija ističe posle dva sata neaktivnosti. Na tuđem računaru uvek kliknite **Odjava** (gore desno).
+Sesija ističe posle dva sata neaktivnosti. Na tuđem računaru uvek kliknite **Odjava** (gore desno). Ako ste zaboravili da
+se odjavite na drugom računaru: **Podešavanja → Moj nalog → Odjavi me sa svih uređaja**.
 
 ## Prvi korak: naziv knjigovodstva
 Administrator u **Podešavanja** upisuje **naziv knjigovodstva**. Taj naziv korisnik vidi u aplikaciji posle skeniranja i
-na odštampanoj kartici. Na istoj stranici vidite javnu adresu panela i verziju.
+na odštampanoj kartici. Na istoj stranici vidite javnu adresu panela i verziju (verzija se prikazuje samo prijavljenima).
 
 ## Kontrolna tabla
 Prikazuje sve korisnike, broj računa primljenih u tekućem mesecu i vreme poslednjeg slanja. Kolona „Poslednje slanje"
@@ -65,7 +69,11 @@ Svaki izvoz se beleži u dnevnik.
 ## Nalozi (samo administrator)
 - **Nalozi → Novi nalog**: korisničko ime (slova bez kvačica, cifre, `.`, `-`, `_`, `@`), uloga i lozinka od najmanje
   12 znakova. Lozinku saopštite zaposlenom lično; on je posle može promeniti u **Podešavanja → Promena lozinke**.
-- **Nova lozinka**: postavlja novu lozinku nalogu koji je zaboravio svoju.
+- **Nova lozinka**: postavlja novu lozinku nalogu koji je zaboravio svoju. Nalog se odmah odjavljuje sa svih uređaja;
+  dvofaktorska prijava ostaje uključena.
+- **Resetuj 2FA** (samo kod naloga sa uključenom 2FA, ne za sopstveni nalog): isključuje dvofaktorsku prijavu naloga koji
+  je izgubio telefon i odjavljuje ga sa svih uređaja. Radnja se beleži u dnevnik; zaposleni posle prijave odmah ponovo
+  uključi 2FA.
 - **Deaktiviraj / Aktiviraj**: deaktiviran nalog ne može da se prijavi (i odmah se odjavljuje). Sopstveni nalog ne možete
   deaktivirati, a uvek mora ostati bar jedan aktivan administrator.
 
@@ -76,8 +84,16 @@ Preporučujemo je za sve naloge, a obavezno za administratore.
    skeniranjem QR koda ili ručnim unosom tajnog ključa.
 3. Upišite šestocifreni kod iz aplikacije i kliknite **Potvrdi i uključi**.
 
-Isključivanje traži vašu lozinku. Ako izgubite telefon, administrator vam postavlja novu lozinku, a 2FA ponovo uključite
-posle prijave. (Ako je administrator jedini i izgubio je telefon, pogledajte [bezbednost.md](bezbednost.md).)
+Uključivanje odjavljuje ostale uređaje na kojima ste prijavljeni (tamo se prijavite ponovo, sa kodom).
+Isključivanje traži vašu lozinku **i** trenutni kod iz aplikacije. Ako izgubite telefon, administrator u **Nalozi**
+klikne **Resetuj 2FA** za vaš nalog; prijavite se lozinkom i odmah ponovo uključite 2FA. (Nova lozinka sama ne isključuje
+2FA. Ako je administrator jedini i izgubio je telefon, pogledajte [bezbednost.md](bezbednost.md).)
+
+## Promena lozinke i odjava sa svih uređaja
+- **Podešavanja → Promena lozinke**: posle promene ostajete prijavljeni ovde, a svi ostali uređaji i pregledači sa vašim
+  nalogom se odjavljuju.
+- **Podešavanja → Moj nalog → Odjavi me sa svih uređaja**: isto, bez promene lozinke — npr. kad ste zaboravili da se
+  odjavite na tuđem računaru.
 
 ## API za knjigovođu (samo administrator)
 **Podešavanja → API za knjigovođu** sadrži prekidač **Uključi API za knjigovođu**. Pri uključivanju dobijate nasumičnu
@@ -86,7 +102,9 @@ Sam API (čitanje korisnika i računa iz knjigovodstvenog programa) dolazi u nar
 
 ## Dnevnik radnji
 **Dnevnik** prikazuje poslednjih 200 radnji: prijave i odjave, dodavanje i izmene korisnika, nove ključeve, deaktivacije,
-izvoze, promene naloga, lozinki, 2FA, API-ja i ažuriranja — sa vremenom, nalogom i IP adresom.
+izvoze, promene naloga, lozinki, 2FA (i reset 2FA), odjave sa svih uređaja, API-ja i ažuriranja — sa vremenom, nalogom i
+IP adresom. Upisuje se i kad korisnik u jednom danu pošalje više od pola dnevnog limita računa (2000) i kad ga dostigne
+(nalog „sistem") — neobično mnogo računa može da znači da je njegov QR kod/ključ dospeo u pogrešne ruke.
 
 ## Ažuriranje
 Administrator u meniju **Ažuriranje** vidi da li postoji nova verzija i šta donosi. Ništa se ne menja bez vaše potvrde,

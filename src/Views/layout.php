@@ -2,7 +2,8 @@
 /**
  * Zajednički raspored stranica panela. Jedina obavezna promenljiva je $content (gotov HTML stranice); ostale su opcione:
  * $title, $nav (aktivna stavka: tabla|korisnici|nalozi|dnevnik|podesavanja|azuriranje), $currentUser (?User), $csrf,
- * $u (callable: putanja → adresa sa osnovnom putanjom instalacije), $flash (list<array{type,message}>), $version,
+ * $u (callable: putanja → adresa sa osnovnom putanjom instalacije), $flash (list<array{type,message}>), $version (prikazuje
+ * se samo prijavljenima — tačna verzija ne treba nepoznatima),
  * $accountantName, $withQr (učitaj biblioteku za QR).
  */
 use function RacunatorPanel\Kernel\e;
@@ -63,7 +64,7 @@ $items = [
   <?= $content ?? '' ?>
 </main>
 <footer class="footer no-print">
-  Računator panel<?= isset($version) && $version !== '' ? ' · verzija ' . e($version) : '' ?><?= !empty($accountantName) ? ' · ' . e($accountantName) : '' ?>
+  Računator panel<?= $currentUser !== null && isset($version) && $version !== '' ? ' · verzija ' . e($version) : '' ?><?= !empty($accountantName) ? ' · ' . e($accountantName) : '' ?>
 </footer>
 </body>
 </html>

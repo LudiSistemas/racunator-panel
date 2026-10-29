@@ -3,10 +3,12 @@ declare(strict_types=1);
 
 namespace RacunatorPanel\Controllers;
 
+use RacunatorPanel\Auth\ApiDailyLimiter;
 use RacunatorPanel\Auth\ApiRateLimiter;
 use RacunatorPanel\Kernel\Request;
 use RacunatorPanel\Kernel\Response;
 use RacunatorPanel\Models\Client;
+use RacunatorPanel\Repositories\AuditLogRepository;
 use RacunatorPanel\Repositories\ClientRepository;
 use RacunatorPanel\Repositories\ReceiptRepository;
 use RacunatorPanel\Repositories\SettingsRepository;
@@ -17,6 +19,9 @@ use RacunatorPanel\Services\KeyGenerator;
  *   GET  /u/{slug}/ping      — provera uparivanja;
  *   POST /u/{slug}/receipts  — prijem računa (do 200 po zahtevu, telo do 1 MB).
  * Autentifikacija: `Authorization: Bearer <ključ>`. Pogrešan ključ i nepostojeći/neaktivan slug daju isti 401.
+ * Ograničenja: 60 zahteva u minutu po ključu (ApiRateLimiter) i dnevni broj prihvaćenih računa po korisniku
+ * (settings `api_daily_limit`, podrazumevano 2000; 0 = bez dnevnog limita). Prelazak 50 % i dostizanje dnevnog limita
+ * se jednom dnevno upisuju u dnevnik radnji (`api.daily_warning`, `api.daily_limit`).
  */
 final class ClientApiController
 {
@@ -37,6 +42,8 @@ final class ClientApiController
         private readonly SettingsRepository $settings,
         private readonly ApiRateLimiter $limiter,
         private readonly ?\PDO $pdo = null,
+        private readonly ?ApiDailyLimiter $daily = null,
+        private readonly ?AuditLogRepository $audit = null,
     ) {
     }
 
@@ -83,6 +90,12 @@ final class ClientApiController
         if (count($items) > self::MAX_RECEIPTS) {
             return self::error(413, 'too_many_receipts', 'Najviše ' . self::MAX_RECEIPTS . ' računa po zahtevu.');
         }
+        $limit = $this->daily !== null ? $this->dailyLimit() : 0;
+        $before = $limit > 0 ? $this->daily->acceptedToday($client->id) : 0;
+        if ($limit > 0 && $before >= $limit) {
+            $this->noteDaily($request, $client, ApiDailyLimiter::WARN_LIMIT, $before, $limit);
+            return $this->dailyLimited($limit, 0);
+        }
 
         $accepted = [];
         $duplicates = [];
@@ -102,6 +115,13 @@ final class ClientApiController
                     $duplicates[] = $receipt['invoiceNumber'];
                 }
             }
+            $total = $limit > 0 && $accepted !== [] ? $this->daily->add($client->id, count($accepted)) : $before;
+            if ($total > $limit && $limit > 0 && $this->pdo?->inTransaction()) {
+                // Ceo zahtev bi prešao dnevni limit: ništa se ne upisuje (ni brojač), aplikacija šalje manje ili sutra.
+                $this->pdo->rollBack();
+                $this->noteDaily($request, $client, ApiDailyLimiter::WARN_LIMIT, $before, $limit);
+                return $this->dailyLimited($limit, max(0, $limit - $before));
+            }
             if ($this->pdo?->inTransaction()) {
                 $this->pdo->commit();
             }
@@ -112,7 +132,37 @@ final class ClientApiController
             throw $e;
         }
 
+        if ($limit > 0 && $before * 2 < $limit && $total * 2 >= $limit) {
+            $this->noteDaily($request, $client, ApiDailyLimiter::WARN_HALF, $total, $limit);
+        }
         return self::json(['accepted' => $accepted, 'duplicates' => $duplicates, 'rejected' => $rejected]);
+    }
+
+    /** Dnevni limit iz podešavanja (`api_daily_limit`); 0 = bez limita. */
+    private function dailyLimit(): int
+    {
+        $value = trim((string) $this->settings->get('api_daily_limit', (string) ApiDailyLimiter::DEFAULT_LIMIT));
+        return ctype_digit($value) ? (int) $value : ApiDailyLimiter::DEFAULT_LIMIT;
+    }
+
+    /** Upis u dnevnik radnji, najviše jednom dnevno po nivou (50 % / limit). */
+    private function noteDaily(Request $request, Client $client, int $level, int $count, int $limit): void
+    {
+        if ($this->audit === null || $this->daily === null || !$this->daily->markWarned($client->id, $level)) {
+            return;
+        }
+        $action = $level === ApiDailyLimiter::WARN_LIMIT ? 'api.daily_limit' : 'api.daily_warning';
+        $this->audit->log(null, $action, 'client', $client->id, $request->ip, $client->name . ': ' . $count . ' / ' . $limit);
+    }
+
+    private function dailyLimited(int $limit, int $remaining): Response
+    {
+        $wait = $this->daily?->secondsUntilTomorrow() ?? 3600;
+        $message = $remaining > 0
+            ? 'Zahtev bi prešao dnevni limit od ' . $limit . ' računa. Danas može još ' . $remaining . ' — pošaljite manje računa ili pokušajte sutra.'
+            : 'Dostignut je dnevni limit od ' . $limit . ' računa. Pokušajte ponovo sutra.';
+        return self::json(['error' => 'daily_limit', 'message' => $message, 'remaining' => $remaining], 429,
+            ['Retry-After' => (string) $wait]);
     }
 
     /**

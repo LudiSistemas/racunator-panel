@@ -19,14 +19,17 @@ final class AppIntegrationTest extends TestCase
     private App $app;
     private ArraySession $session;
     private string $storage;
+    private \PDO $pdo;
+    private Config $config;
 
     protected function setUp(): void
     {
         $this->storage = sys_get_temp_dir() . '/rp-panel-' . bin2hex(random_bytes(4));
         mkdir($this->storage);
         $this->session = new ArraySession();
-        $config = new Config(['public_url' => 'https://knjig.test/panel', 'storage' => $this->storage, 'app_key' => str_repeat('b', 64)]);
-        $this->app = App::create(dirname(__DIR__, 2), $config, TestDb::pdo(), $this->session);
+        $this->config = new Config(['public_url' => 'https://knjig.test/panel', 'storage' => $this->storage, 'app_key' => str_repeat('b', 64)]);
+        $this->pdo = TestDb::pdo();
+        $this->app = App::create(dirname(__DIR__, 2), $this->config, $this->pdo, $this->session);
         $this->app->users->create('admin', (new PasswordHasher())->hash(self::PASSWORD), 'admin', null);
         $this->app->settings->set('accountant_name', 'Knjigovodstvo XY');
     }
@@ -36,12 +39,52 @@ final class AppIntegrationTest extends TestCase
         @rmdir($this->storage);
     }
 
-    private function request(string $method, string $path, array $form = [], array $headers = [], array $query = []): Response
+    private function request(string $method, string $path, array $form = [], array $headers = [], array $query = [], ?App $app = null): Response
     {
+        $app ??= $this->app;
         if ($method === 'POST' && !isset($form['_token'])) {
-            $form['_token'] = $this->app->guard->csrfToken();
+            $form['_token'] = $app->guard->csrfToken();
         }
-        return $this->app->handle(new Request($method, $path, $query, $form, null, $headers, [], '192.0.2.10', true));
+        return $app->handle(new Request($method, $path, $query, $form, null, $headers, [], '192.0.2.10', true));
+    }
+
+    /** Nova „instanca zahteva" nad istom sesijom (kao sledeći HTTP zahtev istog pregledača). */
+    private function next(ArraySession $session): App
+    {
+        return App::create(dirname(__DIR__, 2), $this->config, $this->pdo, $session);
+    }
+
+    public function testDvaKorakaIOdjavaDrugihSesija(): void
+    {
+        $admin = $this->app->users->findByUsername('admin');
+        $secret = \RacunatorPanel\Auth\Totp::generateSecret();
+        $this->app->users->updateTotpSecret($admin->id, $secret);
+        self::assertStringStartsWith('enc:', (string) $this->pdo->query('SELECT totp_secret FROM users')->fetchColumn(),
+            'TOTP tajna je u bazi šifrovana (app_key)');
+
+        // Pregledač A: lozinka → korak za kod → kod.
+        $step1 = $this->request('POST', '/prijava', ['korisnicko_ime' => 'admin', 'lozinka' => self::PASSWORD]);
+        self::assertSame(200, $step1->status);
+        self::assertStringContainsString('name="korak" value="kod"', $step1->body);
+        $a = $this->next($this->session);
+        $ok = $this->request('POST', '/prijava', ['korak' => 'kod', 'kod' => \RacunatorPanel\Auth\Totp::code($secret)], app: $a);
+        self::assertSame('/panel/', $ok->headers['Location'] ?? null);
+
+        // Pregledač B: isti nalog (sledeći kod, jer je tekući iskorišćen).
+        $sessionB = new ArraySession();
+        $b = $this->next($sessionB);
+        $this->request('POST', '/prijava', ['korisnicko_ime' => 'admin', 'lozinka' => self::PASSWORD], app: $b);
+        $b = $this->next($sessionB);
+        $okB = $this->request('POST', '/prijava', ['korak' => 'kod', 'kod' => \RacunatorPanel\Auth\Totp::code($secret, time() + 30)], app: $b);
+        self::assertSame('/panel/', $okB->headers['Location'] ?? null);
+        self::assertSame(200, $this->request('GET', '/', app: $this->next($sessionB))->status);
+
+        // A: „Odjavi me sa svih uređaja" → A ostaje prijavljen, B je odjavljen.
+        $a = $this->next($this->session);
+        self::assertSame(303, $this->request('POST', '/podesavanja/odjava-svuda', app: $a)->status);
+        self::assertSame(200, $this->request('GET', '/', app: $this->next($this->session))->status);
+        self::assertSame('/panel/prijava', $this->request('GET', '/', app: $this->next($sessionB))->headers['Location'] ?? null);
+        self::assertContains('user.sessions_revoked', array_column($this->app->audit->recent(20), 'action'));
     }
 
     public function testPrijavaKreiranjeKorisnikaIUparivanje(): void

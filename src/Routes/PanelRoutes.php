@@ -50,6 +50,7 @@ final class PanelRoutes
         $r->post('/nalozi/{id}/deaktiviraj', $users->deactivate(...));
         $r->post('/nalozi/{id}/aktiviraj', $users->activate(...));
         $r->post('/nalozi/{id}/lozinka', $users->setPassword(...));
+        $r->post('/nalozi/{id}/resetuj-2fa', $users->resetTwoFactor(...));
 
         $settings = new SettingsController($app, $services);
         $r->get('/podesavanja', $settings->index(...));
@@ -58,6 +59,7 @@ final class PanelRoutes
         $r->post('/podesavanja/lozinka', $settings->changePassword(...));
         $r->get('/podesavanja/2fa', $settings->twoFactor(...));
         $r->post('/podesavanja/2fa', $settings->twoFactorSave(...));
+        $r->post('/podesavanja/odjava-svuda', $settings->logoutEverywhere(...));
         $r->get('/podesavanja/api', $settings->api(...));
         $r->post('/podesavanja/api', $settings->apiSave(...));
 

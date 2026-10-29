@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace RacunatorPanel\Controllers\Panel;
 
 use RacunatorPanel\App;
+use RacunatorPanel\Auth\AccountGuard;
 use RacunatorPanel\Kernel\Request;
 use RacunatorPanel\Kernel\Response;
 use RacunatorPanel\Models\User;
@@ -38,6 +39,24 @@ abstract class BaseController
             return null;
         }
         return $user;
+    }
+
+    /** Guard sa prijavom u dva koraka i osvežavanjem sesije (u radu uvek SessionGuard), ili null. */
+    protected function accountGuard(): ?AccountGuard
+    {
+        return $this->app->guard instanceof AccountGuard ? $this->app->guard : null;
+    }
+
+    /**
+     * Poništava sve sesije naloga (povećava `session_version`). Ako je to tekući nalog, tekuća sesija ostaje važeća:
+     * preuzima novu verziju i dobija nov ID.
+     */
+    protected function revokeSessions(User $target): void
+    {
+        $this->app->users->bumpSessionVersion($target->id);
+        if ($this->app->guard->user()?->id === $target->id) {
+            $this->accountGuard()?->refreshSession();
+        }
     }
 
     /** Prijavljen nalog za ekrane koji su već prošli `requireUser()`. */

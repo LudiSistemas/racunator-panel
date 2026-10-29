@@ -3,12 +3,15 @@ declare(strict_types=1);
 
 namespace RacunatorPanel\Controllers\Panel;
 
+use RacunatorPanel\Auth\TotpSteps;
 use RacunatorPanel\Kernel\Request;
 use RacunatorPanel\Kernel\Response;
 
 /**
- * Podešavanja: naziv knjigovodstva, javni URL i verzija (prikaz), promena lozinke, dvofaktorska prijava (TOTP)
- * i prekidač API-ja za knjigovođu (faza A: samo čuvanje podešavanja i ključa; sam API dolazi kasnije).
+ * Podešavanja: naziv knjigovodstva, javni URL i verzija (prikaz), promena lozinke, dvofaktorska prijava (TOTP),
+ * „Odjavi me sa svih uređaja" i prekidač API-ja za knjigovođu (faza A: samo čuvanje podešavanja i ključa).
+ * Promena lozinke, uključivanje/isključivanje 2FA i odjava sa svih uređaja povećavaju `session_version` naloga: ostale
+ * sesije tog naloga prestaju da važe, a tekuća dobija nov ID.
  *
  * Ključevi u settings: `accountant_name`, `accountant_api_enabled` ('1'|'0'), `accountant_api_slug`,
  * `accountant_api_key_prefix`, `accountant_api_key_hash` (SHA-256 hex, kao kod korisnika), `accountant_api_enabled_at` (UTC).
@@ -17,6 +20,7 @@ final class SettingsController extends BaseController
 {
     private const TOTP_ISSUER = 'Računator panel';
     private const NAME_MAX = 150;
+    private const DISABLE_MAX_FAILS = 5;
 
     public function index(Request $request, array $params = []): Response
     {
@@ -79,8 +83,9 @@ final class SettingsController extends BaseController
             return $this->passwordPage($errors, 422);
         }
         $this->app->users->updatePassword($user->id, $this->services->hashPassword($new));
+        $this->revokeSessions($user);
         $this->audit($request, 'user.password_change', 'user', $user->id);
-        $this->flash()->success('Lozinka je promenjena.');
+        $this->flash()->success('Lozinka je promenjena. Ostali uređaji na kojima ste bili prijavljeni su odjavljeni.');
         return $this->redirect('/podesavanja');
     }
 
@@ -110,11 +115,13 @@ final class SettingsController extends BaseController
                 return $this->redirect('/podesavanja/2fa');
             }
             $code = (string) preg_replace('/\D+/', '', $this->field($request, 'kod'));
-            if (strlen($code) !== 6 || !$this->services->totpVerify($secret, $code)) {
+            // Kod kojim se 2FA uključuje se beleži kao iskorišćen — ne može odmah da posluži i za prijavu.
+            if (strlen($code) !== 6 || !$this->totpSteps()->verifyAndConsume($user->id, $secret, $code)) {
                 return $this->twoFactorPage('Kod nije tačan. Proverite da je vreme na telefonu tačno i unesite novi kod.', 422);
             }
             $this->app->users->updateTotpSecret($user->id, $secret);
             $this->panelSession()->forget('totp_pending');
+            $this->revokeSessions($user);
             $this->audit($request, 'user.2fa_enable', 'user', $user->id);
             $this->flash()->success('Dvofaktorska prijava je uključena. Pri sledećoj prijavi unesite i kod iz aplikacije.');
             return $this->redirect('/podesavanja/2fa');
@@ -125,16 +132,45 @@ final class SettingsController extends BaseController
                 return $this->redirect('/podesavanja/2fa');
             }
             $password = $this->rawField($request, 'lozinka');
-            if ($password === '' || !$this->services->verifyPassword($password, $user->passwordHash)) {
-                return $this->twoFactorPage('Lozinka nije tačna — dvofaktorska prijava nije isključena.', 422);
+            $code = (string) preg_replace('/\D+/', '', $this->field($request, 'kod'));
+            // Isključivanje traži i lozinku i važeći kod: ukradena sesija ili lozinka nisu dovoljne.
+            $passwordOk = $password !== '' && $this->services->verifyPassword($password, $user->passwordHash);
+            $codeOk = $passwordOk && strlen($code) === 6
+                && $this->totpSteps()->verifyAndConsume($user->id, $user->totpSecret, $code);
+            if (!$passwordOk || !$codeOk) {
+                // Zaštita od pogađanja koda iz preuzete sesije: posle 5 neuspeha sesija se odjavljuje.
+                $fails = (int) $this->panelSession()->get('totp_disable_fails') + 1;
+                if ($fails >= self::DISABLE_MAX_FAILS) {
+                    $this->audit($request, 'user.2fa_disable_blocked', 'user', $user->id);
+                    $this->app->guard->logout();
+                    $this->flash()->error('Previše neuspelih pokušaja isključivanja dvofaktorske prijave — odjavljeni ste.');
+                    return $this->redirect('/prijava');
+                }
+                $this->panelSession()->set('totp_disable_fails', $fails);
+                return $this->twoFactorPage('Lozinka ili kod nisu tačni — dvofaktorska prijava nije isključena.', 422);
             }
+            $this->panelSession()->forget('totp_disable_fails');
             $this->app->users->updateTotpSecret($user->id, null);
+            $this->revokeSessions($user);
             $this->audit($request, 'user.2fa_disable', 'user', $user->id);
             $this->flash()->success('Dvofaktorska prijava je isključena.');
             return $this->redirect('/podesavanja/2fa');
         }
 
         return $this->redirect('/podesavanja/2fa');
+    }
+
+    /** „Odjavi me sa svih uređaja": sve sesije naloga prestaju da važe, osim tekuće (ona dobija nov ID). */
+    public function logoutEverywhere(Request $request, array $params = []): Response
+    {
+        if ($deny = $this->guardPost($request)) {
+            return $deny;
+        }
+        $user = $this->user();
+        $this->revokeSessions($user);
+        $this->audit($request, 'user.sessions_revoked', 'user', $user->id);
+        $this->flash()->success('Odjavljeni ste sa svih ostalih uređaja i pregledača. Ovde ostajete prijavljeni.');
+        return $this->redirect('/podesavanja');
     }
 
     public function api(Request $request, array $params = []): Response
@@ -193,6 +229,11 @@ final class SettingsController extends BaseController
         }
 
         return $this->redirect('/podesavanja/api');
+    }
+
+    private function totpSteps(): TotpSteps
+    {
+        return new TotpSteps($this->app->settings);
     }
 
     private function issueApiKey(): string

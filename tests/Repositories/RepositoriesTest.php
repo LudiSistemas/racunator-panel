@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace RacunatorPanel\Tests\Repositories;
 
 use PHPUnit\Framework\TestCase;
+use RacunatorPanel\Auth\SecretCipher;
 use RacunatorPanel\Models\User;
 use RacunatorPanel\Repositories\PdoAuditLogRepository;
 use RacunatorPanel\Repositories\PdoClientRepository;
@@ -50,6 +51,66 @@ final class RepositoriesTest extends TestCase
 
         $users->setActive($admin->id, false);
         self::assertSame(0, $users->countAdmins());
+    }
+
+    public function testVerzijaSesije(): void
+    {
+        $users = new PdoUserRepository($this->pdo);
+        $u = $users->create('ana', 'h', User::ROLE_STAFF, null);
+        self::assertSame(1, $u->sessionVersion);
+        $users->bumpSessionVersion($u->id);
+        $users->bumpSessionVersion($u->id);
+        self::assertSame(3, $users->findById($u->id)?->sessionVersion);
+        self::assertSame(3, $users->all()[0]->sessionVersion);
+    }
+
+    public function testTotpTajnaSeCuvaSifrovana(): void
+    {
+        $cipher = new SecretCipher(str_repeat('a', 64));
+        $users = new PdoUserRepository($this->pdo, $cipher);
+        $u = $users->create('ana', 'h', User::ROLE_STAFF, null);
+        $users->updateTotpSecret($u->id, 'JBSWY3DPEHPK3PXP');
+        $raw = (string) $this->pdo->query('SELECT totp_secret FROM users WHERE id = ' . $u->id)->fetchColumn();
+        self::assertStringStartsWith('enc:', $raw);
+        self::assertStringNotContainsString('JBSWY3DPEHPK3PXP', $raw);
+        self::assertSame('JBSWY3DPEHPK3PXP', $users->findById($u->id)?->totpSecret);
+        self::assertSame('JBSWY3DPEHPK3PXP', $users->findByUsername('ana')?->totpSecret);
+
+        // Drugi app_key: tajna se ne dešifruje, ostaje šifrat (nijedan kod mu ne odgovara — 2FA se ne gasi tiho).
+        $other = new PdoUserRepository($this->pdo, new SecretCipher(str_repeat('b', 64)));
+        self::assertSame($raw, $other->findById($u->id)?->totpSecret);
+
+        $users->updateTotpSecret($u->id, null);
+        self::assertNull($this->pdo->query('SELECT totp_secret FROM users WHERE id = ' . $u->id)->fetchColumn());
+        self::assertNull($users->findById($u->id)?->totpSecret);
+    }
+
+    public function testStaraTajnaUCistomTekstuSePrebacujeUSifrovanuPriPrijavi(): void
+    {
+        $plain = new PdoUserRepository($this->pdo);
+        $u = $plain->create('ana', 'h', User::ROLE_STAFF, null);
+        $plain->updateTotpSecret($u->id, 'JBSWY3DPEHPK3PXP');
+        self::assertSame('JBSWY3DPEHPK3PXP', $this->pdo->query('SELECT totp_secret FROM users')->fetchColumn());
+
+        $users = new PdoUserRepository($this->pdo, new SecretCipher(str_repeat('a', 64)));
+        self::assertSame('JBSWY3DPEHPK3PXP', $users->findById($u->id)?->totpSecret, 'stari zapis se čita kao čist tekst');
+        $users->touchLogin($u->id);
+        self::assertStringStartsWith('enc:', (string) $this->pdo->query('SELECT totp_secret FROM users')->fetchColumn());
+        self::assertSame('JBSWY3DPEHPK3PXP', $users->findById($u->id)?->totpSecret);
+    }
+
+    public function testAtomicanBrojac(): void
+    {
+        $s = new PdoSettingsRepository($this->pdo);
+        self::assertTrue($s->advanceCounter('totp_last_step.1', 100));
+        self::assertSame('100', $s->get('totp_last_step.1'));
+        self::assertFalse($s->advanceCounter('totp_last_step.1', 100), 'isti korak drugi put');
+        self::assertFalse($s->advanceCounter('totp_last_step.1', 99));
+        self::assertTrue($s->advanceCounter('totp_last_step.1', 101));
+        // Stara vrednost upisana kao običan tekst se poredi brojčano (ne kao string: '99' > '100').
+        $s->set('totp_last_step.2', '99');
+        self::assertTrue($s->advanceCounter('totp_last_step.2', 100));
+        self::assertFalse($s->advanceCounter('totp_last_step.2', 99));
     }
 
     public function testDuplikatKorisnickogImena(): void

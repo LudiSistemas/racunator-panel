@@ -9,12 +9,16 @@ use function RacunatorPanel\Kernel\e;
   <?php if ($enabled): ?>
     <p><span class="badge badge-ok">uključena</span> Pri prijavi se pored lozinke traži i šestocifreni kod iz aplikacije za autentifikaciju.</p>
     <h2>Isključivanje</h2>
-    <p class="muted">Isključite samo ako menjate telefon ili aplikaciju — posle toga odmah ponovo uključite.</p>
+    <p class="muted">Isključite samo ako menjate telefon ili aplikaciju — posle toga odmah ponovo uključite. Potrebni su
+       lozinka i trenutni kod iz aplikacije. Ako ste izgubili telefon, administrator može da resetuje dvofaktorsku prijavu
+       vašeg naloga (Nalozi → Resetuj 2FA).</p>
     <form method="post" action="<?= e($u('/podesavanja/2fa')) ?>" class="form" data-confirm="Isključiti dvofaktorsku prijavu? Nalog će biti zaštićen samo lozinkom.">
       <input type="hidden" name="_token" value="<?= e($csrf) ?>">
       <input type="hidden" name="radnja" value="iskljuci">
       <label for="lozinka">Vaša lozinka</label>
       <input id="lozinka" name="lozinka" type="password" autocomplete="current-password" required>
+      <label for="kod-iskljuci">Kod iz aplikacije</label>
+      <input id="kod-iskljuci" name="kod" type="text" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" autocomplete="one-time-code" required placeholder="123456">
       <button type="submit" class="btn btn-danger">Isključi dvofaktorsku prijavu</button>
     </form>
   <?php else: ?>

@@ -103,7 +103,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/Greska"
         "429":
-          $ref: "#/components/responses/PreviseZahteva"
+          description: >-
+            Više od 60 zahteva u minutu (`rate_limited`) ili bi zahtev prešao dnevni limit prihvaćenih računa (`daily_limit`,
+            podrazumevano 2000 dnevno po korisniku; zahtev se tada ne upisuje ni delimično). Kod `daily_limit` polje
+            `remaining` kaže koliko računa danas još može da se pošalje.
+          headers:
+            Retry-After:
+              description: Broj sekundi do sledećeg pokušaja (za `daily_limit` do ponoći po UTC-u).
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Greska"
+                  - type: object
+                    properties:
+                      remaining:
+                        type: integer
+                        minimum: 0
+                        description: Samo uz `daily_limit`.
         "503":
           $ref: "#/components/responses/Odrzavanje"
 components:
@@ -260,7 +279,7 @@ components:
       properties:
         error:
           type: string
-          enum: [invalid_body, unauthorized, payload_too_large, too_many_receipts, rate_limited, maintenance]
+          enum: [invalid_body, unauthorized, payload_too_large, too_many_receipts, rate_limited, daily_limit, maintenance]
         message:
           type: string
 

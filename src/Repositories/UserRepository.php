@@ -17,4 +17,6 @@ interface UserRepository
     public function updateTotpSecret(int $id, ?string $secret): void;
     public function setActive(int $id, bool $active): void;
     public function touchLogin(int $id): void;
+    /** Povećava `session_version` naloga: sve postojeće sesije tog naloga prestaju da važe. */
+    public function bumpSessionVersion(int $id): void;
 }

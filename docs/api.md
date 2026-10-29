@@ -17,7 +17,9 @@ Panel prikazuje QR kod sa JSON sadržajem:
 - Autentifikacija: `Authorization: Bearer <ključ>`. Pozivati isključivo preko HTTPS-a.
 - Telo i odgovor: `application/json; charset=utf-8`. Aplikacija šalje `X-Racunator-Api: 1`; panel ga vraća u svakom odgovoru.
 - Pogrešan ključ, nepostojeći slug i deaktiviran korisnik daju **isti** odgovor 401 (ne otkriva se da li korisnik postoji).
-- Ograničenje: 60 zahteva u minutu po ključu; preko toga 429 sa zaglavljem `Retry-After` (sekunde).
+- Ograničenje: 60 zahteva u minutu po ključu; preko toga 429 `rate_limited` sa zaglavljem `Retry-After` (sekunde).
+- Dnevni limit: najviše **2000 prihvaćenih računa** po korisniku u jednom danu (UTC; knjigovođa ga menja podešavanjem
+  `api_daily_limit`, `0` = bez limita). Broje se samo `accepted` računi (ne duplikati ni odbijeni). Vidi „Dnevni limit".
 - Tokom ažuriranja panela svi API pozivi vraćaju 503 sa `Retry-After: 120` — pokušati ponovo kasnije.
 
 ## GET /u/{slug}/ping
@@ -33,7 +35,8 @@ Odgovor 200:
 `accountant` je naziv knjigovodstva iz podešavanja panela (`accountant_name`).
 
 ## POST /u/{slug}/receipts
-Slanje do **200 računa** u jednom zahtevu; telo najviše **1 MB**.
+Slanje do **200 računa** u jednom zahtevu; telo najviše **1 MB** (veće telo, ili `Content-Length` preko 1 MB, dobija 413
+pre nego što panel pročita telo).
 
 ```sh
 curl -s https://domen.rs/panel/u/0f3c…/receipts \
@@ -66,6 +69,16 @@ Nepoznata polja se ignorišu. Mesec u panelu se određuje po `sdcDateTime`.
 - `rejected` — računi koji nisu prošli proveru, sa razlogom (`polje: opis`). `invoiceNumber` je `null` ako ga nije bilo.
   Ponovno slanje istog neispravnog računa neće uspeti.
 
+### Dnevni limit
+Ako bi zahtev prešao dnevni limit, panel ga odbija **u celosti** (ništa se ne upisuje) sa 429 i poljem `remaining`:
+```json
+{"error":"daily_limit","message":"Zahtev bi prešao dnevni limit od 2000 računa. Danas može još 37 — …","remaining":37}
+```
+- `remaining > 0` — pošaljite najviše toliko računa (ostatak sutra);
+- `remaining = 0` — limit je dostignut; ponoviti posle `Retry-After` sekundi (do ponoći po UTC-u).
+`GET /ping` radi i kad je limit dostignut. Kad korisnik pređe pola limita i kad ga dostigne, panel to jednom dnevno
+upisuje u dnevnik radnji knjigovođe.
+
 ## Greške
 Telo greške: `{"error":"<kod>","message":"<opis na srpskom>"}`.
 
@@ -77,11 +90,14 @@ Telo greške: `{"error":"<kod>","message":"<opis na srpskom>"}`.
 | 413 | `payload_too_large` | telo veće od 1 MB | podeliti na manje pakete |
 | 413 | `too_many_receipts` | više od 200 računa | podeliti na pakete do 200 |
 | 429 | `rate_limited` | više od 60 zahteva u minutu | sačekati `Retry-After` sekundi |
+| 429 | `daily_limit` | dnevni limit prihvaćenih računa bi bio pređen | poslati najviše `remaining` računa, ostalo posle `Retry-After` |
 | 503 | `maintenance` | panel se ažurira | pokušati ponovo posle `Retry-After` |
 | 500 | — | greška na serveru (HTML stranica) | pokušati ponovo kasnije |
 
 ## Provera rada
-`GET /health` (bez ključa) vraća `{"ok":true,"version":"0.1.0"}` — 503 i `"ok":false` ako baza nije dostupna.
+`GET /health` (bez ključa) vraća `{"ok":true}` — 503 i `"ok":false` ako baza nije dostupna. Verziju (`"version":"…"`)
+dodaje samo za prijavljenog administratora i za samoproveru instalacije/ažuriranja (zaglavlje `X-Racunator-Health-Token`
+sa vrednošću `App::healthToken(app_key)` = HMAC-SHA256 od `racunator-panel/health` ključem `app_key`).
 
 ## API za knjigovođu
 Planiran (faza C): `/api/<slug>/v1/…`, uključuje se u panelu. Biće opisan ovde i u `openapi.yaml`.

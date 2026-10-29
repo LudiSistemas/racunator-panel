@@ -4,12 +4,14 @@ declare(strict_types=1);
 namespace RacunatorPanel\Tests\Api;
 
 use PHPUnit\Framework\TestCase;
+use RacunatorPanel\Auth\ApiDailyLimiter;
 use RacunatorPanel\Auth\ApiRateLimiter;
 use RacunatorPanel\Controllers\ClientApiController;
 use RacunatorPanel\Kernel\Request;
 use RacunatorPanel\Kernel\Response;
 use RacunatorPanel\Kernel\Router;
 use RacunatorPanel\Models\Client;
+use RacunatorPanel\Repositories\PdoAuditLogRepository;
 use RacunatorPanel\Repositories\PdoClientRepository;
 use RacunatorPanel\Repositories\PdoReceiptRepository;
 use RacunatorPanel\Repositories\PdoSettingsRepository;
@@ -24,12 +26,14 @@ final class ClientApiTest extends TestCase
     private Client $client;
     private string $key;
     private int $rateLimit = 60;
+    private int $now = 1_800_000_000;
+    private PdoSettingsRepository $settings;
 
     protected function setUp(): void
     {
         $this->pdo = TestDb::pdo();
         $this->clients = new PdoClientRepository($this->pdo);
-        $settings = new PdoSettingsRepository($this->pdo);
+        $settings = $this->settings = new PdoSettingsRepository($this->pdo);
         $settings->set('accountant_name', 'Knjigovodstvo XY');
         $this->key = KeyGenerator::apiKey();
         $this->client = $this->clients->create('Pera DOO', KeyGenerator::slug(), KeyGenerator::prefix($this->key), KeyGenerator::hash($this->key), null);
@@ -44,6 +48,8 @@ final class ClientApiTest extends TestCase
             new PdoSettingsRepository($this->pdo),
             new ApiRateLimiter($this->pdo, $this->rateLimit),
             $this->pdo,
+            new ApiDailyLimiter($this->pdo, fn (): int => $this->now),
+            new PdoAuditLogRepository($this->pdo),
         );
         $this->router = new Router();
         $this->router->get('/u/{slug}/ping', [$api, 'ping']);
@@ -255,5 +261,74 @@ final class ClientApiTest extends TestCase
         self::assertSame('2026-10-24T21:42:31', $ok['sdcDateTime']);
         self::assertIsString($ok['rawJson']);
         self::assertNull(ClientApiController::validate([1, 2])[0]);
+    }
+
+    /** @return list<array<string,mixed>> */
+    private static function batch(int $from, int $count): array
+    {
+        $out = [];
+        for ($i = $from; $i < $from + $count; $i++) {
+            $out[] = self::receipt('RCVG4AFL-RCVG4AFL-' . $i);
+        }
+        return $out;
+    }
+
+    private function auditActions(): array
+    {
+        return $this->pdo->query('SELECT action FROM audit_log ORDER BY id')->fetchAll(\PDO::FETCH_COLUMN);
+    }
+
+    public function testDnevniLimit(): void
+    {
+        $this->settings->set('api_daily_limit', '10');
+        $ok = $this->post(['receipts' => self::batch(1, 4)]);
+        self::assertSame(200, $ok->status);
+        self::assertCount(4, self::data($ok)['accepted']);
+        self::assertSame([], $this->auditActions());
+
+        // Prelazak 50 % limita se jednom beleži u dnevnik.
+        self::assertSame(200, $this->post(['receipts' => self::batch(5, 2)])->status);
+        self::assertSame(['api.daily_warning'], $this->auditActions());
+        self::assertSame(200, $this->post(['receipts' => self::batch(7, 1)])->status);
+        self::assertSame(['api.daily_warning'], $this->auditActions());
+
+        // Duplikati se ne broje.
+        self::assertSame(200, $this->post(['receipts' => self::batch(1, 7)])->status);
+
+        // Zahtev koji bi prešao limit se odbija u celosti (ništa se ne upisuje), uz broj preostalih.
+        $over = $this->post(['receipts' => self::batch(8, 5)]);
+        self::assertSame(429, $over->status);
+        self::assertSame('daily_limit', self::data($over)['error']);
+        self::assertSame(3, self::data($over)['remaining']);
+        self::assertGreaterThan(0, (int) $over->headers['Retry-After']);
+        self::assertSame(7, (int) $this->pdo->query('SELECT COUNT(*) FROM receipts')->fetchColumn());
+
+        self::assertSame(200, $this->post(['receipts' => self::batch(8, 3)])->status);
+        $full = $this->post(['receipts' => self::batch(20, 1)]);
+        self::assertSame(429, $full->status);
+        self::assertSame(0, self::data($full)['remaining']);
+        self::assertStringContainsString('sutra', self::data($full)['message']);
+        $this->post(['receipts' => self::batch(21, 1)]);
+        self::assertSame(['api.daily_warning', 'api.daily_limit'], $this->auditActions(), 'dostizanje limita jednom dnevno');
+        // Ping i dalje radi.
+        self::assertSame(200, $this->ping()->status);
+
+        // Sledećeg dana brojač kreće od nule.
+        $this->now += 86400;
+        self::assertSame(200, $this->post(['receipts' => self::batch(20, 2)])->status);
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM api_daily')->fetchColumn());
+    }
+
+    public function testDnevniLimitPodrazumevanoIIskljucen(): void
+    {
+        $daily = new ApiDailyLimiter($this->pdo, fn (): int => $this->now);
+        self::assertSame(2000, ApiDailyLimiter::DEFAULT_LIMIT);
+        self::assertSame(200, $this->post(['receipts' => self::batch(1, 3)])->status);
+        self::assertSame(3, $daily->acceptedToday($this->client->id));
+
+        $this->settings->set('api_daily_limit', '0');
+        $this->pdo->exec('UPDATE api_daily SET accepted = 1000000');
+        self::assertSame(200, $this->post(['receipts' => self::batch(4, 1)])->status, '0 = bez dnevnog limita');
+        self::assertSame(86400 - ($this->now % 86400), $daily->secondsUntilTomorrow());
     }
 }

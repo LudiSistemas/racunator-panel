@@ -7,7 +7,10 @@ use RacunatorPanel\Kernel\Request;
 use RacunatorPanel\Kernel\Response;
 use RacunatorPanel\Models\User;
 
-/** Nalozi knjigovodstva (samo administrator): lista, dodavanje, (de)aktivacija, postavljanje lozinke. */
+/**
+ * Nalozi knjigovodstva (samo administrator): lista, dodavanje, (de)aktivacija, postavljanje lozinke, reset 2FA.
+ * Nova lozinka, deaktivacija i reset 2FA povećavaju `session_version` naloga — sve njegove sesije se odjavljuju.
+ */
 final class UsersController extends BaseController
 {
     public const PASSWORD_MIN = 12;
@@ -88,8 +91,34 @@ final class UsersController extends BaseController
             return $this->listPage([$target->id => $error], $target->id, 422);
         }
         $this->app->users->updatePassword($target->id, $this->services->hashPassword($this->rawField($request, 'lozinka')));
+        $this->revokeSessions($target);
         $this->audit($request, 'user.password_reset', 'user', $target->id, $target->username);
-        $this->flash()->success('Nova lozinka za nalog „' . $target->username . '" je postavljena.');
+        $this->flash()->success('Nova lozinka za nalog „' . $target->username . '" je postavljena; nalog je odjavljen sa svih uređaja.'
+            . ($target->totpSecret !== null ? ' Dvofaktorska prijava ostaje uključena (za izgubljen telefon: Resetuj 2FA).' : ''));
+        return $this->redirect('/nalozi');
+    }
+
+    /** Administrator isključuje 2FA drugom nalogu (npr. izgubljen telefon). Sopstvenu 2FA isključuje u Podešavanjima (uz kod). */
+    public function resetTwoFactor(Request $request, array $params = []): Response
+    {
+        if ($deny = $this->guardPost($request, true)) {
+            return $deny;
+        }
+        $target = $this->findUser($params);
+        if ($target === null) {
+            return $this->notFound('Nalog ne postoji.');
+        }
+        if ($target->id === $this->user()->id) {
+            $this->flash()->error('Sopstvenu dvofaktorsku prijavu isključujete u Podešavanja → Dvofaktorska prijava (uz lozinku i kod).');
+            return $this->redirect('/nalozi');
+        }
+        if ($target->totpSecret !== null) {
+            $this->app->users->updateTotpSecret($target->id, null);
+            $this->revokeSessions($target);
+            $this->audit($request, 'user.2fa_reset', 'user', $target->id, $target->username);
+        }
+        $this->flash()->success('Dvofaktorska prijava naloga „' . $target->username . '" je isključena i nalog je odjavljen sa svih uređaja.'
+            . ' Neka se prijavi lozinkom i odmah ponovo uključi 2FA.');
         return $this->redirect('/nalozi');
     }
 
@@ -129,6 +158,9 @@ final class UsersController extends BaseController
         }
         if ($target->active !== $active) {
             $this->app->users->setActive($target->id, $active);
+            if (!$active) {
+                $this->revokeSessions($target);
+            }
             $this->audit($request, $active ? 'user.activate' : 'user.deactivate', 'user', $target->id, $target->username);
         }
         $this->flash()->success('Nalog „' . $target->username . '" je ' . ($active ? 'aktiviran.' : 'deaktiviran.'));

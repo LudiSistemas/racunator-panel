@@ -31,6 +31,12 @@ use function RacunatorPanel\Kernel\e;
               <button type="submit" class="btn btn-small">Aktiviraj</button>
             </form>
           <?php endif; ?>
+          <?php if ($usr->totpSecret !== null): ?>
+            <form method="post" action="<?= e($u('/nalozi/' . $usr->id . '/resetuj-2fa')) ?>" class="inline" data-confirm="Resetovati dvofaktorsku prijavu naloga „<?= e($usr->username) ?>"? Nalog će se prijavljivati samo lozinkom dok ponovo ne uključi 2FA, a sve njegove sesije se odjavljuju.">
+              <input type="hidden" name="_token" value="<?= e($csrf) ?>">
+              <button type="submit" class="btn btn-small btn-warning">Resetuj 2FA</button>
+            </form>
+          <?php endif; ?>
         <?php endif; ?>
         <details class="inline-details"<?= $openId === $usr->id ? ' open' : '' ?>>
           <summary class="btn btn-small">Nova lozinka</summary>

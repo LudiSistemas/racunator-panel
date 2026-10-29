@@ -90,8 +90,6 @@ final class NativeSession implements SessionStore
         ini_set('session.use_only_cookies', '1');
         ini_set('session.use_trans_sid', '0');
         ini_set('session.gc_maxlifetime', (string) $this->lifetime);
-        ini_set('session.sid_length', '48');
-        ini_set('session.sid_bits_per_character', '6');
         if ($this->savePath !== null && (is_dir($this->savePath) || @mkdir($this->savePath, 0700, true)) && is_writable($this->savePath)) {
             session_save_path($this->savePath);
             // Sopstveni folder: neki hostinzi čiste samo podrazumevani, pa uključujemo i PHP-ovo čišćenje.

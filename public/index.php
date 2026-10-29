@@ -47,7 +47,15 @@ try {
         racunator_panel_error_page(503, 'Panel nije instaliran', 'Panel još nije podešen. Pokrenite instalaciju (racunator-panel-install.php).');
         return;
     }
-    App::boot($root)->handle(Request::fromGlobals())->send();
+    // Preveliko telo se odbija pre čitanja u memoriju (Request::fromGlobals čita najviše MAX_BODY + 1 bajt i kad
+    // Content-Length nije poslat, npr. kod chunked prenosa).
+    $declaredLength = (string) ($_SERVER['CONTENT_LENGTH'] ?? '');
+    if (ctype_digit($declaredLength) && (strlen($declaredLength) > 12 || (int) $declaredLength > Request::MAX_BODY)) {
+        App::payloadTooLarge()->send();
+        return;
+    }
+    $app = App::boot($root);
+    $app->handle(Request::fromGlobals($app->trustedProxies()))->send();
 } catch (\Throwable $e) {
     racunator_panel_log_error($root, $e);
     racunator_panel_error_page(500, 'Greška na serveru', 'Došlo je do greške. Pokušajte ponovo, a ako se ponovi, obratite se administratoru panela.');

@@ -4,15 +4,20 @@ declare(strict_types=1);
 namespace RacunatorPanel\Auth;
 
 /**
- * Ograničenje pokušaja prijave preko tabele `login_attempts` (beleže se samo neuspeli pokušaji):
- * najviše 5 neuspelih za isti par IP + korisničko ime u 15 minuta, i najviše 30 sa iste IP adrese
- * (bilo koje korisničko ime) — protiv isprobavanja mnogo naloga.
+ * Ograničenje pokušaja prijave preko tabele `login_attempts` (beleže se samo neuspeli pokušaji). Tri nezavisna brojača:
+ *  1. isti par IP + korisničko ime: 5 neuspelih u 15 minuta → blokada do isteka prozora;
+ *  2. ista IP adresa (bilo koje ime): 30 neuspelih u 15 minuta — protiv isprobavanja mnogo naloga;
+ *  3. isto korisničko ime sa BILO KOJE adrese (u poslednja 24 h), sa rastućim čekanjem od poslednjeg neuspeha:
+ *     5 → 1 min, 10 → 5 min, 20 → 30 min — protiv pogađanja lozinke jednog naloga sa mnogo adresa.
+ * IPv6 adrese se grupišu po /64 (`IpAddress::limiterKey`), jer korisnik obično raspolaže celim /64 blokom.
  */
 final class RateLimiter
 {
     public const MAX_PER_USER = 5;
     public const MAX_PER_IP = 30;
     public const WINDOW = 900;
+    /** Broj neuspeha za korisničko ime (sa svih adresa) → čekanje u sekundama od poslednjeg neuspeha. */
+    public const USERNAME_TIERS = [20 => 1800, 10 => 300, 5 => 60];
     private const KEEP = 86400;
 
     /** @var \Closure():int */
@@ -28,34 +33,41 @@ final class RateLimiter
     {
         $now = ($this->clock)();
         $since = gmdate('Y-m-d H:i:s', $now - self::WINDOW);
+        $key = IpAddress::limiterKey($ip);
         $user = self::normalize($username);
 
         $stmt = $this->pdo->prepare('SELECT COUNT(*) AS c, MIN(at) AS first FROM login_attempts WHERE ip = ? AND username = ? AND at > ?');
-        $stmt->execute([$ip, $user, $since]);
-        $wait = self::waitFrom($stmt->fetch(), self::MAX_PER_USER, $now);
+        $stmt->execute([$key, $user, $since]);
+        $waits = [self::waitFrom($stmt->fetch(), self::MAX_PER_USER, $now)];
 
         $stmt = $this->pdo->prepare('SELECT COUNT(*) AS c, MIN(at) AS first FROM login_attempts WHERE ip = ? AND at > ?');
-        $stmt->execute([$ip, $since]);
-        $waitIp = self::waitFrom($stmt->fetch(), self::MAX_PER_IP, $now);
+        $stmt->execute([$key, $since]);
+        $waits[] = self::waitFrom($stmt->fetch(), self::MAX_PER_IP, $now);
 
-        if ($wait === null && $waitIp === null) {
-            return null;
-        }
-        return max((int) $wait, (int) $waitIp);
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) AS c, MAX(at) AS last FROM login_attempts WHERE username = ? AND at > ?');
+        $stmt->execute([$user, gmdate('Y-m-d H:i:s', $now - self::KEEP)]);
+        $waits[] = self::usernameWait($stmt->fetch(), $now);
+
+        $waits = array_filter($waits, static fn (?int $w): bool => $w !== null);
+        return $waits === [] ? null : max($waits);
     }
 
     public function hit(string $ip, string $username): void
     {
         $now = ($this->clock)();
         $this->pdo->prepare('INSERT INTO login_attempts (ip, username, at) VALUES (?, ?, ?)')
-            ->execute([substr($ip, 0, 45), self::normalize($username), gmdate('Y-m-d H:i:s', $now)]);
+            ->execute([IpAddress::limiterKey($ip), self::normalize($username), gmdate('Y-m-d H:i:s', $now)]);
         $this->cleanup();
     }
 
-    /** Posle uspešne prijave brišu se neuspeli pokušaji za taj par. */
+    /**
+     * Posle uspešne prijave brišu se neuspeli pokušaji za taj par (IP + ime). Pokušaji istog imena sa drugih adresa
+     * ostaju — ako neko napada nalog, uspešna prijava vlasnika ne poništava čekanje napadaču.
+     */
     public function clear(string $ip, string $username): void
     {
-        $this->pdo->prepare('DELETE FROM login_attempts WHERE ip = ? AND username = ?')->execute([$ip, self::normalize($username)]);
+        $this->pdo->prepare('DELETE FROM login_attempts WHERE ip = ? AND username = ?')
+            ->execute([IpAddress::limiterKey($ip), self::normalize($username)]);
     }
 
     /** Briše zapise starije od jednog dana. */
@@ -88,5 +100,21 @@ final class RateLimiter
         }
         $first = strtotime((string) $row['first'] . ' UTC');
         return max(1, $first + self::WINDOW - $now);
+    }
+
+    /** @param array<string,mixed>|false $row */
+    private static function usernameWait(array|false $row, int $now): ?int
+    {
+        if (!$row || $row['last'] === null) {
+            return null;
+        }
+        $count = (int) $row['c'];
+        foreach (self::USERNAME_TIERS as $threshold => $seconds) {
+            if ($count >= $threshold) {
+                $until = strtotime((string) $row['last'] . ' UTC') + $seconds;
+                return $until > $now ? $until - $now : null;
+            }
+        }
+        return null;
     }
 }

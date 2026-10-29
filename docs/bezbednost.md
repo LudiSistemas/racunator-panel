@@ -7,7 +7,7 @@ Ovaj dokument je za **knjigovođe** koji panel koriste i za **održavaoce** koji
 ## Šta se čuva u panelu
 - **Računi** vaših korisnika (firmi i preduzetnika): PFR broj, link za proveru, datum, iznos, prodavac i PIB-ovi.
 - **Korisnici**: naziv, napomena, adresa za aplikaciju i **heš** API ključa (sam ključ se ne čuva).
-- **Nalozi** knjigovodstva: korisničko ime, heš lozinke, tajna za dvofaktorsku prijavu, uloga.
+- **Nalozi** knjigovodstva: korisničko ime, heš lozinke, tajna za dvofaktorsku prijavu (šifrovana), uloga.
 - **Dnevnik radnji** (ko je šta uradio, kada i sa koje IP adrese).
 - **config.php**: lozinka baze i tajni ključ instalacije.
 - **Rezervne kopije** (`storage/backups/`): kopija svih fajlova (uključujući config.php) i cele baze.
@@ -20,15 +20,31 @@ važni kao lozinka za panel.
 ### Prijava i lozinke
 - Lozinke se čuvaju samo kao heš (Argon2id, a gde ga hosting nema — bcrypt). Panel nikad ne zna ni ne prikazuje vašu lozinku.
 - Nova lozinka mora imati najmanje **12 znakova**. Najbolje je fraza od nekoliko reči, npr. „plavi-kofer-sedam-oblaka".
-- Posle **5 neuspelih pokušaja** za isto korisničko ime sa iste IP adrese (ili 30 sa iste adrese za bilo koje ime) prijava
-  se blokira na 15 minuta.
+- Ograničenje pokušaja prijave (broje se samo neuspeli pokušaji, uključujući pogrešan kod za 2FA):
+  - **5 neuspelih** za isto korisničko ime sa iste IP adrese, ili **30** sa iste adrese za bilo koja imena → blokada 15 minuta;
+  - za isto korisničko ime **sa bilo koje adrese** (u poslednja 24 sata) čekanje raste: posle **5** neuspelih 1 minut, posle
+    **10** 5 minuta, posle **20** 30 minuta (od poslednjeg neuspeha). To štiti i od pogađanja lozinke sa mnogo adresa;
+  - IPv6 adrese se broje po mreži `/64` (jedan priključak obično dobija ceo `/64` blok adresa).
 - Poruka „Pogrešno korisničko ime ili lozinka" je ista bez obzira na to da li nalog postoji.
+- IP adresa posetioca (za ograničenje i dnevnik) je adresa sa koje je zahtev stigao. Zaglavlja `X-Forwarded-For` i
+  `X-Forwarded-Proto` se poštuju **samo** ako zahtev stiže sa pouzdanog proksija navedenog u `config.php` (vidi
+  „Proksi i HTTPS u config.php" ispod) — inače bi svako mogao da „promeni" svoju adresu i zaobiđe ograničenje.
 
 ### Dvofaktorska prijava (2FA)
 - Uključuje se u **Podešavanja → Dvofaktorska prijava**, aplikacijom za autentifikaciju na telefonu (Google Authenticator,
   Microsoft Authenticator, Aegis, 2FAS…). Standard je TOTP: šestocifreni kod koji se menja na 30 sekundi.
-- Isti kod ne može da se upotrebi dva puta za prijavu. Prihvata se kod za tekućih 30 s i susedne intervale (za telefon čiji
-  sat malo kasni ili žuri) — zato sat na telefonu treba da je podešen automatski.
+- Prijava ide u **dva koraka**: posle korisničkog imena i lozinke nalog sa 2FA uvek dobija stranicu samo za kod (rok
+  5 minuta) — i kad lozinka nije tačna. Da li je lozinka bila tačna saznaje se tek posle koda („Pogrešna lozinka ili kod"),
+  pa napadač bez telefona ne može da proveri da li je pogodio lozinku.
+- Isti kod ne može da se upotrebi dva puta (ni za prijavu, ni za uključivanje ili isključivanje 2FA; kod kojim je 2FA
+  uključena se odmah beleži kao iskorišćen). Prihvata se kod za tekućih 30 s i susedne intervale (za telefon čiji sat malo
+  kasni ili žuri) — zato sat na telefonu treba da je podešen automatski.
+- **Isključivanje** 2FA traži lozinku **i** važeći kod iz aplikacije (posle 5 neuspelih pokušaja sesija se odjavljuje i to
+  se beleži u dnevnik). Administrator može drugom nalogu da resetuje 2FA
+  (Nalozi → **Resetuj 2FA**, beleži se u dnevnik); sopstvenu 2FA administrator isključuje samo uz kod.
+- Tajne za 2FA su u bazi **šifrovane** ključem izvedenim iz tajnog ključa instalacije (`app_key` u `config.php`):
+  ko dođe samo do baze (npr. izvoz iz phpMyAdmin-a), ne može da pravi kodove. Ako se `app_key` promeni ili izgubi, nalozi
+  sa 2FA ne mogu da se prijave dok administrator ne resetuje njihovu 2FA (jedini administrator — vidi „Izgubljen telefon").
 - **Uključite 2FA na svakom nalogu, a obavezno na administratorskim.** Lozinka može da procuri (phishing, ista lozinka na
   drugom sajtu); kod sa telefona ne može.
 
@@ -38,8 +54,10 @@ važni kao lozinka za panel.
   HTTPS-u se šalje samo šifrovano (Secure).
 - Sesija ističe posle **2 sata neaktivnosti** ili **12 sati od prijave**, kao i odmah posle odjave ili deaktivacije naloga.
 - Fajlovi sesija su u `storage/tmp/sessions/`, a ne u zajedničkom `/tmp` folderu hostinga.
-- Promena lozinke **ne odjavljuje** ostale otvorene sesije istog naloga. Ako sumnjate da je neko drugi prijavljen vašim
-  nalogom, vidi „Ako sumnjate na provalu" ispod.
+- **Promena lozinke, nova lozinka koju postavi administrator, uključivanje/isključivanje/reset 2FA i deaktivacija**
+  odjavljuju sve ostale sesije tog naloga (na svim računarima i telefonima). Ko je promenu napravio ostaje prijavljen, uz
+  nov identifikator sesije.
+- **Podešavanja → Moj nalog → Odjavi me sa svih uređaja** odjavljuje sve ostale sesije vašeg naloga, bez promene lozinke.
 
 ### Zaštita formi (CSRF) i klikdžeking
 - Svaka forma koja nešto menja nosi tajni token sesije; zahtev bez ispravnog tokena se odbija. Zlonamerni sajt zato ne može
@@ -53,8 +71,8 @@ važni kao lozinka za panel.
 | Kontrolna tabla, korisnici, QR kod, nov ključ, (de)aktivacija korisnika | da | da |
 | Računi po mesecu i izvoz CSV | da | da |
 | Dnevnik radnji | da | da |
-| Sopstvena lozinka i 2FA | da | da |
-| Nalozi (dodavanje, deaktivacija, nova lozinka zaposlenom) | ne | da |
+| Sopstvena lozinka, 2FA i odjava sa svih uređaja | da | da |
+| Nalozi (dodavanje, deaktivacija, nova lozinka, reset 2FA drugom nalogu) | ne | da |
 | Izmena naziva knjigovodstva, API za knjigovođu | ne | da |
 | Ažuriranje, povratak verzije, preuzimanje rezervnih kopija | ne | da |
 
@@ -67,7 +85,10 @@ Svi nalozi vide sve korisnike — panel je zamišljen za jednu kancelariju. Svak
 - **QR kartica je ključ.** Ko ima QR kod ili ključ, može da šalje račune u ime tog korisnika. Karticu predajte lično, a
   posle skeniranja je uništite ili čuvajte zaključanu. Ako se izgubi — **Nov ključ**: stari odmah prestaje da važi.
 - Pogrešan ključ, nepostojeća adresa i deaktiviran korisnik daju isti odgovor (ne otkriva se ko postoji).
-- Ograničenja: 60 zahteva u minutu po ključu, najviše 200 računa i 1 MB po zahtevu. Svaki račun se proverava (oblik PFR
+- Ograničenja: 60 zahteva u minutu po ključu, najviše 200 računa i 1 MB po zahtevu (veće telo se odbija pre čitanja u
+  memoriju), i najviše **2000 prihvaćenih računa dnevno** po korisniku (podešavanje `api_daily_limit` u tabeli `settings`;
+  `0` = bez dnevnog limita). Kad korisnik pređe pola dnevnog limita i kad ga dostigne, to se jednom dnevno upisuje u
+  **Dnevnik radnji** — neobično mnogo računa može da znači da je ključ procureo. Svaki račun se proverava (oblik PFR
   broja, link mora biti na `https://suf.purs.gov.rs/`, datum, iznos, PIB od 9 cifara); ostalo se odbija.
 - Panel **ne proverava račune kod Poreske uprave** — prikazuje ono što aplikacija pošalje. Za proveru pojedinačnog računa
   koristite dugme „Otvori na sajtu Poreske uprave".
@@ -79,9 +100,15 @@ Svi nalozi vide sve korisnike — panel je zamišljen za jednu kancelariju. Svak
   pa ga Excel prikazuje kao tekst, a ne izvršava kao formulu.
 - Link „Otvori na sajtu Poreske uprave" se prikazuje samo za adrese na `https://suf.purs.gov.rs/`.
 
+### Verzija panela
+- Tačnu verziju vide samo prijavljeni (podnožje stranice, Podešavanja). Provera rada `/health` neprijavljenima vraća samo
+  `{"ok":true}`; verziju dobija prijavljen administrator ili samoprovera instalacije i ažuriranja (tajno zaglavlje izvedeno
+  iz `app_key`). Tako nepoznati ne mogu lako da otkriju da li panel ima neku poznatu, a još neispravljenu slabost.
+
 ### Dnevnici
-- **Dnevnik radnji** u panelu beleži prijave, odjave, izmene korisnika i naloga, nove ključeve, izvoze, 2FA, ažuriranja i
-  preuzimanja rezervnih kopija.
+- **Dnevnik radnji** u panelu beleži prijave, odjave, izmene korisnika i naloga, nove ključeve, izvoze, 2FA (uključivanje,
+  isključivanje, reset od strane administratora), odjave sa svih uređaja, dnevni limit API-ja, ažuriranja i preuzimanja
+  rezervnih kopija.
 - Ključevi, lozinke i kodovi se **nikad** ne upisuju u dnevnik radnji ni u log grešaka. Log grešaka
   (`storage/logs/error.log`) sadrži tip greške i mesto u kodu, bez vrednosti argumenata; posetilac vidi samo kratku poruku.
 
@@ -116,6 +143,8 @@ nalaze se u folderu panela, a od pristupa preko veba ih štite `.htaccess` pravi
    RewriteCond %{HTTP:X-Forwarded-Proto} !=https
    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
    ```
+   Isto može i sam panel: u `config.php` dodajte `'force_https' => true,` (vidi ispod). `.htaccess` pravilo je i dalje
+   bolje, jer preusmerava i pre nego što se PHP pokrene.
 2. **Apache sa `mod_rewrite` i `AllowOverride All`** (ili nginx podešen kao u [instalacija.md](instalacija.md), sa
    document root-om na `public/`). Ako hosting ispred Apache-a ima nginx koji sam služi statične fajlove (keš), zatražite
    od podrške da poštuje `.htaccess` za folder panela.
@@ -132,6 +161,20 @@ nalaze se u folderu panela, a od pristupa preko veba ih štite `.htaccess` pravi
 5. **PHP radi pod vašim korisnikom** (PHP-FPM ili suPHP — standard na većini hostinga). Tada drugi nalozi na istom serveru
    ne mogu da čitaju vaše fajlove.
 
+### Proksi i HTTPS u config.php
+Dve opcione stavke u `config.php` (fajl je vaš; ažuriranje ga ne menja):
+```php
+'trusted_proxies' => ['10.0.0.0/8'],   // adrese proksija/balansera ispred panela (CIDR), podrazumevano nijedan
+'force_https'     => true,             // panel sam preusmerava http:// na https:// (osim /health), podrazumevano false
+```
+- `trusted_proxies` popunite **samo** ako ispred panela stoji proksi (Cloudflare, balanser, nginx ispred Apache-a) i ako
+  znate njegove adrese (pitajte podršku hostinga). Tada panel pravu adresu posetioca uzima iz `X-Forwarded-For`, a HTTPS
+  prepoznaje iz `X-Forwarded-Proto` — ali samo za zahteve koji zaista dolaze sa tih adresa. Bez ove stavke panel ta
+  zaglavlja ignoriše (posetilac bi inače mogao da ih podmetne). Simptom da vam treba: u Dnevniku radnji sve prijave imaju
+  istu IP adresu (adresu proksija).
+- `force_https` uključite ako ne možete da dodate `.htaccess` pravilo iz tačke 1. Ako je ispred panela proksi koji
+  završava HTTPS, podesite i `trusted_proxies`, inače bi panel preusmeravao u krug.
+
 ### Preporučeno
 - Prava fajlova: folderi 755, fajlovi 644, `config.php` 600, `storage/` 700. **Nikad 777.**
 - PHP ekstenzija **sodium** (provera potpisa pri ažuriranju), `display_errors = Off` na produkciji.
@@ -147,7 +190,8 @@ nalaze se u folderu panela, a od pristupa preko veba ih štite `.htaccess` pravi
   kopiju: ako hosting izgubi disk, nestaju i one.
 - Pravite i **sopstvene redovne kopije van hostinga** (npr. jednom nedeljno): kopija foldera panela (sa `storage/`) i
   izvoz baze iz phpMyAdmin-a. Mnogi hostinzi nude automatske dnevne kopije — uključite ih.
-- Kopije sadrže sve račune, heševe lozinki, tajne za 2FA i lozinku baze. Čuvajte ih šifrovane (npr. arhiva sa lozinkom ili
+- Kopije sadrže sve račune, heševe lozinki, tajne za 2FA (šifrovane, ali je ključ — `config.php` — u istoj kopiji) i
+  lozinku baze. Čuvajte ih šifrovane (npr. arhiva sa lozinkom ili
   šifrovan disk), ne šaljite ih e-poštom i ne stavljajte u deljene foldere.
 - Povremeno proverite da kopija može da se vrati (npr. na probnom folderu).
 
@@ -158,9 +202,11 @@ nalaze se u folderu panela, a od pristupa preko veba ih štite `.htaccess` pravi
 - Ne otvarajte panel preko javnog Wi-Fi-ja bez HTTPS-a.
 
 ## Izgubljen telefon (2FA)
-- **Zaposleni je izgubio telefon:** panel trenutno nema dugme kojim administrator isključuje tuđu dvofaktorsku prijavu
-  (nova lozinka ne isključuje 2FA). Administrator to radi u bazi (ispod), a zaposleni posle prijave odmah ponovo uključi 2FA.
-- **Jedini administrator je izgubio telefon:** isto, u bazi.
+- **Zaposleni (ili drugi administrator) je izgubio telefon:** administrator u **Nalozi** klikne **Resetuj 2FA** kod tog
+  naloga. Dvofaktorska prijava se isključuje, sve sesije tog naloga se odjavljuju, a radnja se beleži u dnevnik. Zaposleni
+  se prijavi lozinkom i odmah ponovo uključi 2FA. (Nova lozinka sama po sebi **ne** isključuje 2FA.)
+- **Jedini administrator je izgubio telefon:** panel tada ne može da pomogne (sopstvena 2FA se isključuje samo uz kod) —
+  to se radi u bazi:
   - MySQL/MariaDB: phpMyAdmin → baza panela → kartica SQL:
     ```sql
     UPDATE users SET totp_secret = NULL WHERE username = 'korisnicko-ime';
@@ -169,15 +215,16 @@ nalaze se u folderu panela, a od pristupa preko veba ih štite `.htaccess` pravi
     `sqlite3 storage/panel.sqlite "UPDATE users SET totp_secret = NULL WHERE username = 'korisnicko-ime';"`,
     ili zatražite od podrške hostinga da to uradi.
 
-  Ova izmena se ne upisuje u dnevnik radnji — zabeležite je sami. Odmah posle prijave ponovo uključite 2FA.
+  Ova izmena se ne upisuje u dnevnik radnji — zabeležite je sami. Odmah posle prijave ponovo uključite 2FA. Ako imate
+  drugog administratora, bolje je da on klikne **Resetuj 2FA** (beleži se u dnevnik).
 
 ## Ako sumnjate na provalu
 1. Promenite lozinku sopstvenog naloga i administratorskih naloga; svim zaposlenima postavite nove lozinke.
 2. Deaktivirajte naloge koje ne prepoznajete (Nalozi) i pregledajte **Dnevnik radnji** (nepoznate prijave, IP adrese,
    novi nalozi, izvozi, preuzimanja rezervnih kopija).
-3. Pošto promena lozinke ne zatvara druge otvorene sesije, obrišite sadržaj foldera `storage/tmp/sessions/` preko FTP-a —
-   tako se odjavljuju svi, uključujući i napadača. (Ako je folder prazan, hosting ne dozvoljava sopstveni folder za sesije;
-   tada zatražite od podrške da obriše PHP sesije za vaš nalog.)
+3. Promena lozinke (i nova lozinka koju postavi administrator) odjavljuje sve ostale sesije tog naloga, pa je napadač
+   prijavljen tim nalogom odmah odjavljen. Bez promene lozinke isto radi **Podešavanja → Odjavi me sa svih uređaja**.
+   Za potpuno čišćenje (svi nalozi odjednom) možete i da obrišete sadržaj foldera `storage/tmp/sessions/` preko FTP-a.
 4. Za korisnike za koje sumnjate da im je ključ otkriven, kliknite **Nov ključ** i dajte im novi QR kod.
 5. Ako je neko mogao da vidi fajlove na hostingu: promenite lozinku baze (cPanel → MySQL Databases) i upišite novu u
    `config.php`, promenite lozinke za hosting i FTP.
@@ -197,4 +244,4 @@ nalaze se u folderu panela, a od pristupa preko veba ih štite `.htaccess` pravi
 
 ## Prijava bezbednosnog propusta
 Ne objavljujte propust javno (GitHub issue, forum). Pišite na adresu iz [SECURITY.md](../SECURITY.md) sa opisom, koracima za
-ponavljanje i verzijom panela (vidi podnožje stranice u panelu). Odgovaramo u roku od 7 dana.
+ponavljanje i verzijom panela (vidi podnožje stranice posle prijave ili Podešavanja). Odgovaramo u roku od 7 dana.

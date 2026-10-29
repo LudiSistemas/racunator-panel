@@ -37,5 +37,11 @@ $isAdmin = $currentUser !== null && $currentUser->isAdmin();
         <?= $apiEnabled ? '<span class="badge badge-ok">uključen</span>' : '<span class="badge">isključen</span>' ?></li>
       <?php endif; ?>
     </ul>
+    <form method="post" action="<?= e($u('/podesavanja/odjava-svuda')) ?>" class="form" data-confirm="Odjaviti vas sa svih ostalih uređaja i pregledača? Ovde ostajete prijavljeni.">
+      <input type="hidden" name="_token" value="<?= e($csrf) ?>">
+      <button type="submit" class="btn">Odjavi me sa svih uređaja</button>
+      <p class="hint">Za slučaj da ste zaboravili da se odjavite na drugom računaru ili sumnjate da neko koristi vaš nalog.
+         Promena lozinke takođe odjavljuje sve ostale uređaje.</p>
+    </form>
   </section>
 </div>

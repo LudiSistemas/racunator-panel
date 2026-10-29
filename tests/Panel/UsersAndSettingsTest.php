@@ -59,6 +59,7 @@ final class UsersAndSettingsTest extends PanelTestCase
 
         $this->assertRedirect($this->post('/nalozi/' . $staff->id . '/deaktiviraj'), '/panel/nalozi');
         self::assertFalse($this->users->findById($staff->id)->active);
+        self::assertSame(2, $this->users->findById($staff->id)->sessionVersion, 'deaktivacija gasi sesije');
         $this->assertRedirect($this->post('/nalozi/' . $staff->id . '/aktiviraj'), '/panel/nalozi');
         self::assertTrue($this->users->findById($staff->id)->active);
         self::assertSame(['user.deactivate', 'user.activate'], $this->audit->actions());
@@ -83,6 +84,8 @@ final class UsersAndSettingsTest extends PanelTestCase
         $new = 'sasvim-nova-lozinka-42';
         $this->assertRedirect($this->post('/nalozi/' . $staff->id . '/lozinka', ['lozinka' => $new, 'lozinka_ponovo' => $new]), '/panel/nalozi');
         self::assertTrue((new PasswordHasher())->verify($new, $this->users->findById($staff->id)->passwordHash));
+        self::assertSame(2, $this->users->findById($staff->id)->sessionVersion, 'nova lozinka odjavljuje sve sesije naloga');
+        self::assertSame(0, $this->guard->refreshes, 'tuđi nalog: tekuća sesija administratora se ne dira');
         self::assertSame(['user.password_reset'], $this->audit->actions());
     }
 
@@ -95,6 +98,8 @@ final class UsersAndSettingsTest extends PanelTestCase
         self::assertStringContainsString('Trenutna lozinka nije tačna.', $wrong->body);
         $this->assertRedirect($this->post('/podesavanja/lozinka', ['trenutna' => self::PASSWORD, 'lozinka' => $new, 'lozinka_ponovo' => $new]), '/panel/podesavanja');
         self::assertTrue((new PasswordHasher())->verify($new, $this->users->findById($user->id)->passwordHash));
+        self::assertSame(2, $this->users->findById($user->id)->sessionVersion);
+        self::assertSame(1, $this->guard->refreshes, 'tekuća sesija se osvežava');
         self::assertSame(['user.password_change'], $this->audit->actions());
     }
 
@@ -115,16 +120,92 @@ final class UsersAndSettingsTest extends PanelTestCase
         self::assertSame(422, $bad->status);
         self::assertNull($this->users->findById($user->id)->totpSecret);
 
-        $this->assertRedirect($this->post('/podesavanja/2fa', ['radnja' => 'ukljuci', 'kod' => Totp::code($secret)]), '/panel/podesavanja/2fa');
+        $now = time();
+        $code = Totp::code($secret, $now);
+        $this->assertRedirect($this->post('/podesavanja/2fa', ['radnja' => 'ukljuci', 'kod' => $code]), '/panel/podesavanja/2fa');
         self::assertSame($secret, $this->users->findById($user->id)->totpSecret);
-        self::assertStringContainsString('Isključi dvofaktorsku prijavu', $this->get('/podesavanja/2fa')->body);
+        self::assertSame(intdiv($now, 30), (int) $this->settings->get('totp_last_step.' . $user->id), 'kod za uključivanje je iskorišćen');
+        self::assertSame(2, $this->users->findById($user->id)->sessionVersion, 'ostale sesije se odjavljuju');
+        self::assertSame(1, $this->guard->refreshes);
+        $page = $this->get('/podesavanja/2fa')->body;
+        self::assertStringContainsString('Isključi dvofaktorsku prijavu', $page);
+        self::assertStringContainsString('id="kod-iskljuci" name="kod"', $page);
 
-        $wrong = $this->post('/podesavanja/2fa', ['radnja' => 'iskljuci', 'lozinka' => 'pogresna-lozinka']);
-        self::assertSame(422, $wrong->status);
-        self::assertNotNull($this->users->findById($user->id)->totpSecret);
-        $this->assertRedirect($this->post('/podesavanja/2fa', ['radnja' => 'iskljuci', 'lozinka' => self::PASSWORD]), '/panel/podesavanja/2fa');
+        // Isključivanje traži lozinku I važeći, neiskorišćen kod.
+        $next = Totp::code($secret, $now + 30);
+        foreach ([
+            ['lozinka' => self::PASSWORD],                              // bez koda
+            ['lozinka' => 'pogresna-lozinka', 'kod' => $next],          // pogrešna lozinka
+            ['lozinka' => self::PASSWORD, 'kod' => $code],              // kod kojim je 2FA uključena
+            ['lozinka' => self::PASSWORD, 'kod' => $next === '000000' ? '111111' : '000000'],
+        ] as $i => $form) {
+            $wrong = $this->post('/podesavanja/2fa', ['radnja' => 'iskljuci'] + $form);
+            self::assertSame(422, $wrong->status, "slučaj $i");
+            self::assertNotNull($this->users->findById($user->id)->totpSecret);
+        }
+        $this->assertRedirect($this->post('/podesavanja/2fa', ['radnja' => 'iskljuci', 'lozinka' => self::PASSWORD, 'kod' => $next]), '/panel/podesavanja/2fa');
         self::assertNull($this->users->findById($user->id)->totpSecret);
+        self::assertSame(3, $this->users->findById($user->id)->sessionVersion);
         self::assertSame(['user.2fa_enable', 'user.2fa_disable'], $this->audit->actions());
+    }
+
+    public function testPogadjanjeKodaZaIskljucivanjeOdjavljuje(): void
+    {
+        $user = $this->loginAs(User::ROLE_STAFF, 'zaposleni1');
+        $secret = Totp::generateSecret();
+        $this->users->updateTotpSecret($user->id, $secret);
+        $wrong = Totp::verify($secret, '000000') ? '111111' : '000000';
+        for ($i = 0; $i < 4; $i++) {
+            self::assertSame(422, $this->post('/podesavanja/2fa', ['radnja' => 'iskljuci', 'lozinka' => self::PASSWORD, 'kod' => $wrong])->status);
+        }
+        $this->assertRedirect($this->post('/podesavanja/2fa', ['radnja' => 'iskljuci', 'lozinka' => self::PASSWORD, 'kod' => $wrong]), '/panel/prijava');
+        self::assertNull($this->guard->user());
+        self::assertNotNull($this->users->findById($user->id)->totpSecret);
+        self::assertSame(['user.2fa_disable_blocked'], $this->audit->actions());
+    }
+
+    public function testAdminResetujeDvofaktorskuDrugomNalogu(): void
+    {
+        $admin = $this->loginAs();
+        $staff = $this->makeUser('zika', User::ROLE_STAFF);
+        $this->users->updateTotpSecret($staff->id, Totp::generateSecret());
+        $this->users->updateTotpSecret($admin->id, Totp::generateSecret());
+
+        $list = $this->get('/nalozi')->body;
+        self::assertStringContainsString('action="/panel/nalozi/' . $staff->id . '/resetuj-2fa"', $list);
+        self::assertStringNotContainsString('action="/panel/nalozi/' . $admin->id . '/resetuj-2fa"', $list, 'ne za sopstveni nalog');
+
+        $this->assertRedirect($this->post('/nalozi/' . $staff->id . '/resetuj-2fa'), '/panel/nalozi');
+        self::assertNull($this->users->findById($staff->id)->totpSecret);
+        self::assertSame(2, $this->users->findById($staff->id)->sessionVersion);
+        self::assertSame(['user.2fa_reset'], $this->audit->actions());
+
+        // Sopstvenu 2FA administrator ne može da resetuje ovde (to traži kod u Podešavanjima).
+        $this->assertRedirect($this->post('/nalozi/' . $admin->id . '/resetuj-2fa'), '/panel/nalozi');
+        self::assertNotNull($this->users->findById($admin->id)->totpSecret);
+        self::assertStringContainsString('Sopstvenu dvofaktorsku prijavu', $this->get('/nalozi')->body);
+        self::assertSame(['user.2fa_reset'], $this->audit->actions());
+    }
+
+    public function testZaposleniNeMozeDaResetujeDvofaktorsku(): void
+    {
+        $this->loginAs(User::ROLE_STAFF, 'zaposleni1');
+        $other = $this->makeUser('admin9', User::ROLE_ADMIN);
+        $this->users->updateTotpSecret($other->id, Totp::generateSecret());
+        self::assertSame(403, $this->post('/nalozi/' . $other->id . '/resetuj-2fa')->status);
+        self::assertNotNull($this->users->findById($other->id)->totpSecret);
+    }
+
+    public function testOdjavaSaSvihUredjaja(): void
+    {
+        $user = $this->loginAs(User::ROLE_STAFF, 'zaposleni1');
+        self::assertStringContainsString('action="/panel/podesavanja/odjava-svuda"', $this->get('/podesavanja')->body);
+        $this->assertRedirect($this->post('/podesavanja/odjava-svuda'), '/panel/podesavanja');
+        self::assertSame(2, $this->users->findById($user->id)->sessionVersion);
+        self::assertSame(1, $this->guard->refreshes, 'tekuća sesija ostaje (nov ID)');
+        self::assertNotNull($this->guard->user());
+        self::assertSame(['user.sessions_revoked'], $this->audit->actions());
+        self::assertStringContainsString('Odjavljeni ste sa svih ostalih uređaja', $this->get('/podesavanja')->body);
     }
 
     public function testNazivKnjigovodstva(): void
