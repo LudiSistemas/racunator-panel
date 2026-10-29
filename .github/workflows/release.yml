@@ -1,0 +1,76 @@
+name: Izdanje
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: pdo, pdo_sqlite, zip, sodium, mbstring, openssl
+          coverage: none
+          tools: composer:v2
+
+      - name: Tag mora da odgovara src/version.php
+        id: version
+        run: |
+          VERSION="$(php -r 'echo require "src/version.php";')"
+          TAG="${GITHUB_REF_NAME}"
+          if [ "v${VERSION}" != "${TAG}" ]; then
+            echo "::error::Tag ${TAG} ne odgovara verziji iz src/version.php (${VERSION})."
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Javni ključ za potpis mora biti postavljen
+        run: |
+          php -r 'require "src/autoload.php"; exit(RacunatorPanel\Services\ReleaseChecker::publicKeyConfigured() ? 0 : 1);' || {
+            echo "::error::U src/Services/ReleaseChecker.php PUBLIC_KEY je još placeholder (vidi docs/izdavanje.md)."; exit 1; }
+
+      - name: Testovi
+        run: |
+          composer install --no-interaction --no-progress --prefer-dist
+          vendor/bin/phpunit
+
+      - name: Build (ZIP, install fajl, SHA256SUMS, changelog)
+        run: php tools/build-release.php --expect-version="${GITHUB_REF_NAME}"
+
+      - name: Potpis (Ed25519)
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "${RELEASE_SIGNING_KEY}" ]; then
+            echo "::error::Secret RELEASE_SIGNING_KEY nije postavljen (vidi docs/izdavanje.md)."; exit 1
+          fi
+          php tools/sign-release.php "build/racunator-panel-${{ steps.version.outputs.version }}.zip"
+
+      - name: Provera paketa
+        run: |
+          cd build
+          sha256sum -c SHA256SUMS
+          ls -l
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          PRE=""
+          case "$V" in *-*) PRE="--prerelease" ;; esac
+          gh release create "${GITHUB_REF_NAME}" \
+            "build/racunator-panel-${V}.zip" \
+            "build/racunator-panel-${V}.zip.sig" \
+            "build/racunator-panel-install.php" \
+            "build/SHA256SUMS" \
+            --title "Računator panel ${V}" \
+            --notes-file "build/CHANGELOG-${V}.md" \
+            ${PRE}

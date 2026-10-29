@@ -1,0 +1,21 @@
+# Docker test instalacije na „shared hostingu" (tools/docker/test-install.sh). Pokreće se kao projekat racunator-panel-test.
+services:
+  web:
+    build: .
+    ports:
+      - "127.0.0.1:${RP_TEST_PORT:-8089}:80"
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: panel
+      MARIADB_USER: panel
+      MARIADB_PASSWORD: panel-lozinka-test
+      MARIADB_ROOT_PASSWORD: root-lozinka-test
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
