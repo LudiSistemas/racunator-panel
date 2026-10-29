@@ -1,6 +1,6 @@
 # Izmene
 
-## Neobjavljeno
+## 0.3.0 — 2026-10-29
 
 ### Podaci za proveru računa na stranici Poreske uprave
 - API za aplikaciju: nova opciona polja računa `invoiceCounter` (brojač `N/N`, npr. `123/456`) i
