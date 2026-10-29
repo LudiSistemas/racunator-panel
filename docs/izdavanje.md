@@ -3,6 +3,7 @@
 ## Jednom: ključ za potpis izdanja
 Paketi se potpisuju Ed25519 ključem; panel ima javni ključ u kodu i odbija paket sa pogrešnim potpisom.
 1. `php tools/generate-signing-key.php` (potrebna ekstenzija sodium) ispisuje par ključeva.
+   Bezbednije: `php tools/generate-signing-key.php --out ~/racunator-signing.key` upisuje privatni ključ samo u fajl (0600) i na ekranu prikazuje samo javni, pa ga postavite sa `gh secret set RELEASE_SIGNING_KEY < ~/racunator-signing.key` i fajl obrišite.
 2. Javni ključ upišite u `src/Services/ReleaseChecker.php` → konstanta `PUBLIC_KEY` (umesto `ZAMENITI-JAVNIM-KLJUCEM`).
 3. Privatni ključ upišite u GitHub: repo → *Settings → Secrets and variables → Actions → New repository secret*,
    ime **`RELEASE_SIGNING_KEY`**. Sačuvajte ga i u menadžeru lozinki.
