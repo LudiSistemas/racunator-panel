@@ -21,7 +21,7 @@ final class ReleaseChecker
      * Javni Ed25519 ključ za proveru potpisa paketa (base64, 32 bajta). Pravi par: `php tools/generate-signing-key.php`.
      * Dok je ovde PLACEHOLDER, potpis se ne može proveriti i ažuriranje radi samo uz SHA-256 i upozorenje u dnevniku.
      */
-    public const PUBLIC_KEY = 'ZAMENITI-JAVNIM-KLJUCEM';
+    public const PUBLIC_KEY = 'gsy5vNw/tHlWrGRbnlfJzLqAW4okmmoDjU2um5jgkQc=';
 
     public const CACHE_SECONDS = 43200;
     public const FORCE_MIN_SECONDS = 60;
