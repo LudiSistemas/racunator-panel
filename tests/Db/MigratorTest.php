@@ -19,11 +19,11 @@ final class MigratorTest extends TestCase
         $pdo = $this->pdo();
         $m = new Migrator($pdo);
         self::assertSame(0, $m->currentVersion());
-        self::assertSame(['0001_init', '0002_users_session_version', '0003_login_limits_api_daily'], $m->migrate());
-        self::assertSame(3, $m->currentVersion());
+        self::assertSame(['0001_init', '0002_users_session_version', '0003_login_limits_api_daily', '0004_receipt_source'], $m->migrate());
+        self::assertSame(4, $m->currentVersion());
         self::assertSame([], $m->migrate());
         self::assertSame([], (new Migrator($pdo))->migrate());
-        self::assertSame(3, (int) $pdo->query('SELECT COUNT(*) FROM schema_version')->fetchColumn());
+        self::assertSame(4, (int) $pdo->query('SELECT COUNT(*) FROM schema_version')->fetchColumn());
 
         $tables = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table'")->fetchAll(\PDO::FETCH_COLUMN);
         foreach (['users', 'clients', 'receipts', 'settings', 'audit_log', 'login_attempts', 'api_rate', 'api_daily', 'schema_version'] as $t) {
@@ -34,6 +34,47 @@ final class MigratorTest extends TestCase
         self::assertSame('1', (string) $columns['session_version']);
         $indexes = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'index'")->fetchAll(\PDO::FETCH_COLUMN);
         self::assertContains('login_attempts_user_at_idx', $indexes);
+        $receiptColumns = array_column($pdo->query('PRAGMA table_info(receipts)')->fetchAll(), null, 'name');
+        self::assertArrayHasKey('source', $receiptColumns);
+        self::assertSame("'qr'", (string) $receiptColumns['source']['dflt_value']);
+        self::assertSame(1, (int) $receiptColumns['source']['notnull']);
+    }
+
+    public function testMigracija0004PostojeciRacuniDobijajuIzvorQr(): void
+    {
+        $dir = sys_get_temp_dir() . '/rp-mig-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        foreach (['0001_init', '0002_users_session_version', '0003_login_limits_api_daily'] as $name) {
+            copy(dirname(__DIR__, 2) . '/src/Db/migrations/' . $name . '.php', $dir . '/' . $name . '.php');
+        }
+        $pdo = $this->pdo();
+        (new Migrator($pdo, $dir))->migrate();
+        $pdo->exec("INSERT INTO clients (name, slug, api_key_prefix, api_key_hash, created_at) VALUES ('A', 'a', 'p', 'h', '2026-01-01 00:00:00')");
+        $pdo->exec("INSERT INTO receipts (client_id, invoice_number, verification_url, sdc_datetime, total_amount_minor, received_at)"
+            . " VALUES (1, 'X', 'https://suf.purs.gov.rs/v/?vl=abc', '2026-10-01T00:00:00', 1, '2026-10-01 00:00:00')");
+        array_map('unlink', glob($dir . '/*'));
+        rmdir($dir);
+
+        $m = new Migrator($pdo);
+        self::assertSame(['0004_receipt_source'], $m->migrate());
+        self::assertSame(4, $m->currentVersion());
+        self::assertSame('qr', $pdo->query("SELECT source FROM receipts WHERE invoice_number = 'X'")->fetchColumn());
+        $pdo->exec("INSERT INTO receipts (client_id, invoice_number, verification_url, sdc_datetime, total_amount_minor, received_at, source)"
+            . " VALUES (1, 'Y', 'https://suf.purs.gov.rs/verify', '2026-10-01T00:00:00', 1, '2026-10-01 00:00:00', 'pfr')");
+        self::assertSame('pfr', $pdo->query("SELECT source FROM receipts WHERE invoice_number = 'Y'")->fetchColumn());
+        self::assertSame([], $m->migrate());
+    }
+
+    public function testMigracija0004ImaSqlZaObaDrajvera(): void
+    {
+        $sql = require dirname(__DIR__, 2) . '/src/Db/migrations/0004_receipt_source.php';
+        self::assertIsArray($sql['mysql']);
+        self::assertIsArray($sql['sqlite']);
+        $mysql = implode("\n", $sql['mysql']);
+        // Uslovno dodavanje kolone (ponovljeno pokretanje na MySQL-u posle prekida ne sme da padne).
+        self::assertStringContainsString("information_schema.columns", $mysql);
+        self::assertStringContainsString("column_name = 'source'", $mysql);
+        self::assertStringContainsString("ADD COLUMN source VARCHAR(8) NOT NULL DEFAULT ''qr''", $mysql);
     }
 
     public function testNadogradnjaPostojeceBazeSaNalozima(): void
@@ -47,7 +88,7 @@ final class MigratorTest extends TestCase
         array_map('unlink', glob($dir . '/*'));
         rmdir($dir);
 
-        self::assertSame(['0002_users_session_version', '0003_login_limits_api_daily'], (new Migrator($pdo))->migrate());
+        self::assertSame(['0002_users_session_version', '0003_login_limits_api_daily', '0004_receipt_source'], (new Migrator($pdo))->migrate());
         self::assertSame(1, (int) $pdo->query("SELECT session_version FROM users WHERE username = 'ana'")->fetchColumn());
     }
 

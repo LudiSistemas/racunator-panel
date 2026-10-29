@@ -145,6 +145,22 @@ final class Format
         };
     }
 
+    /**
+     * Broj računa sa ispravnim oblikom reči: „1 račun", „21 račun", „2 računa", „11 računa", „5 računa".
+     * (Posle brojeva koji se završavaju na 1, osim 11, ide „račun"; posle svih ostalih „računa".)
+     */
+    public static function receiptCount(int $count): string
+    {
+        $abs = abs($count);
+        return $count . ($abs % 10 === 1 && $abs % 100 !== 11 ? ' račun' : ' računa');
+    }
+
+    /** Izvor računa za prikaz i CSV: „QR" ili „PFR broj". */
+    public static function receiptSource(string $source): string
+    {
+        return $source === 'pfr' ? 'PFR broj' : 'QR';
+    }
+
     /** Da li je link zaista ka sajtu Poreske uprave (SUF) — drugi linkovi se ne prikazuju kao dugme. */
     public static function isSufUrl(string $url): bool
     {

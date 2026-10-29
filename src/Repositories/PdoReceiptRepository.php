@@ -9,8 +9,10 @@ use RacunatorPanel\Models\Receipt;
 /**
  * Računi u tabeli `receipts`. `insertIfNew` očekuje već proverene podatke sa ključevima kao u API-ju:
  * invoiceNumber, verificationUrl, sdcDateTime ('YYYY-MM-DDTHH:MM:SS'), totalAmountMinor (int),
- * opciono sellerName, sellerPib, buyerPib, invoiceType, transactionType, rawJson.
+ * opciono source ('qr' podrazumevano | 'pfr'), sellerName, sellerPib, buyerPib, invoiceType, transactionType, rawJson.
  * Mesec se računa po `sdc_datetime` (vreme sa računa), ne po vremenu prijema.
+ * Nadogradnja: postojeći račun sa source = 'pfr' + nova stavka sa source = 'qr' i pravim linkom iz QR koda
+ * (`https://suf.purs.gov.rs/v/?vl=…`) → red se ažurira podacima nove stavke (vreme prijema ostaje prvobitno).
  */
 final class PdoReceiptRepository implements ReceiptRepository
 {
@@ -24,12 +26,15 @@ final class PdoReceiptRepository implements ReceiptRepository
         if ($invoice === '') {
             throw new \InvalidArgumentException('invoiceNumber je obavezan.');
         }
-        if ($this->exists($clientId, $invoice)) {
-            return false;
+        $source = self::source($data);
+        $existing = $this->existingSource($clientId, $invoice);
+        if ($existing !== null) {
+            return self::isUpgrade($existing, $source, (string) ($data['verificationUrl'] ?? ''))
+                && $this->upgrade($clientId, $invoice, $data);
         }
         $stmt = $this->pdo->prepare('INSERT INTO receipts (client_id, invoice_number, verification_url, sdc_datetime,'
-            . ' total_amount_minor, seller_name, seller_pib, buyer_pib, invoice_type, transaction_type, received_at, raw_json)'
-            . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            . ' total_amount_minor, seller_name, seller_pib, buyer_pib, invoice_type, transaction_type, received_at, raw_json, source)'
+            . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         try {
             $stmt->execute([
                 $clientId,
@@ -44,6 +49,7 @@ final class PdoReceiptRepository implements ReceiptRepository
                 $data['transactionType'] ?? null,
                 gmdate('Y-m-d H:i:s'),
                 $data['rawJson'] ?? null,
+                $source,
             ]);
         } catch (\PDOException $e) {
             // Trka dva istovremena zahteva: drugi upis pada na UNIQUE(client_id, invoice_number).
@@ -105,11 +111,54 @@ final class PdoReceiptRepository implements ReceiptRepository
         return $out;
     }
 
-    private function exists(int $clientId, string $invoice): bool
+    /** Izvor već sačuvanog računa ('qr'/'pfr') ili null ako ga nema. */
+    private function existingSource(int $clientId, string $invoice): ?string
     {
-        $stmt = $this->pdo->prepare('SELECT 1 FROM receipts WHERE client_id = ? AND invoice_number = ?');
+        $stmt = $this->pdo->prepare('SELECT source FROM receipts WHERE client_id = ? AND invoice_number = ?');
         $stmt->execute([$clientId, $invoice]);
-        return $stmt->fetch() !== false;
+        $row = $stmt->fetch();
+        return $row === false ? null : (string) $row['source'];
+    }
+
+    /** Pravilo nadogradnje: samo pfr → qr, i samo sa pravim linkom iz QR koda. */
+    private static function isUpgrade(string $existing, string $incoming, string $url): bool
+    {
+        return $existing === Receipt::SOURCE_PFR && $incoming === Receipt::SOURCE_QR
+            && str_starts_with($url, Receipt::SUF_QR_URL_PREFIX);
+    }
+
+    /**
+     * Zamena podataka računa unetog po PFR broju podacima iz QR koda. Uslov `source = 'pfr'` u WHERE čini nadogradnju
+     * jednokratnom i kod dva istovremena zahteva (drugi ne menja ništa i dobija duplikat).
+     * @param array<string,mixed> $data
+     */
+    private function upgrade(int $clientId, string $invoice, array $data): bool
+    {
+        $stmt = $this->pdo->prepare('UPDATE receipts SET verification_url = ?, source = ?, sdc_datetime = ?, total_amount_minor = ?,'
+            . ' seller_name = ?, seller_pib = ?, buyer_pib = ?, invoice_type = ?, transaction_type = ?, raw_json = ?'
+            . ' WHERE client_id = ? AND invoice_number = ? AND source = ?');
+        $stmt->execute([
+            (string) $data['verificationUrl'],
+            Receipt::SOURCE_QR,
+            (string) $data['sdcDateTime'],
+            (int) $data['totalAmountMinor'],
+            $data['sellerName'] ?? null,
+            $data['sellerPib'] ?? null,
+            $data['buyerPib'] ?? null,
+            $data['invoiceType'] ?? null,
+            $data['transactionType'] ?? null,
+            $data['rawJson'] ?? null,
+            $clientId,
+            $invoice,
+            Receipt::SOURCE_PFR,
+        ]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /** @param array<string,mixed> $data */
+    private static function source(array $data): string
+    {
+        return ($data['source'] ?? Receipt::SOURCE_QR) === Receipt::SOURCE_PFR ? Receipt::SOURCE_PFR : Receipt::SOURCE_QR;
     }
 
     /** @return array{0:string,1:string}|null [početak, početak sledećeg meseca] za 'YYYY-MM' */
@@ -141,6 +190,7 @@ final class PdoReceiptRepository implements ReceiptRepository
             $opt($r['invoice_type']),
             $opt($r['transaction_type']),
             (string) $r['received_at'],
+            (string) ($r['source'] ?? Receipt::SOURCE_QR),
         );
     }
 }

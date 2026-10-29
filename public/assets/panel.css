@@ -161,6 +161,9 @@ form.inline { display: inline; }
 /* PFR broj računa u jednom redu (globalni `code` inače prelama bilo gde) */
 .table .pfr, .table .pfr code { font-family: var(--mono); white-space: nowrap; word-break: normal; }
 .table td.pfr code { font-size: .86em; }
+/* Oznaka računa unetog po PFR broju (bez QR koda) */
+.table td.pfr .badge { font-family: var(--font); margin-left: .35rem; }
+.table .actions .btn + .btn { margin-left: .25rem; }
 .inline-details[open] { display: block; text-align: left; margin-top: .5rem; min-width: 260px; }
 .inline-details[open] .form { margin-top: .5rem; }
 

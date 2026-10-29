@@ -72,6 +72,16 @@ paths:
                   buyerPib: "101234567"
                   invoiceType: Normal
                   transactionType: Sale
+                - invoiceNumber: RCVG4AFL-RCVG4AFL-234121
+                  source: pfr
+                  verificationUrl: https://suf.purs.gov.rs/verify
+                  sdcDateTime: "2026-10-25T09:10:00"
+                  totalAmountMinor: 50000
+                  sellerName: ZORA MARKET DOO
+                  sellerPib: "100000000"
+                  buyerPib: "101234567"
+                  invoiceType: Normal
+                  transactionType: Sale
       responses:
         "200":
           description: Obrađeno. Svaki račun je u tačno jednoj od lista.
@@ -209,16 +219,36 @@ components:
     Racun:
       type: object
       required: [invoiceNumber, verificationUrl, sdcDateTime, totalAmountMinor]
+      description: >-
+        Račun iz QR koda (`source` = `qr` ili bez polja) ili račun unet po PFR broju (`source` = `pfr`, `verificationUrl`
+        tačno `https://suf.purs.gov.rs/verify`). Ako panel već ima isti račun sa `source` = `pfr`, a stigne sa `source` =
+        `qr` i linkom `https://suf.purs.gov.rs/v/?vl=…`, zapis se nadograđuje i račun je u `accepted`; ostali ponovljeni
+        računi su u `duplicates`.
       properties:
         invoiceNumber:
           type: string
           pattern: "^[A-Z0-9]{8}-[A-Z0-9]{8}-\\d{1,10}$"
           description: PFR broj računa; jedinstven po korisniku.
+        source:
+          type: [string, "null"]
+          enum: [qr, pfr, null]
+          default: qr
+          description: "`qr` — račun iz QR koda; `pfr` — račun unet po PFR broju. Nedostaje ili `null` → `qr`."
         verificationUrl:
           type: string
           format: uri
           pattern: "^https://suf\\.purs\\.gov\\.rs/"
           maxLength: 2048
+          description: "Za `qr` link sa računa (`https://suf.purs.gov.rs/v/?vl=…`); za `pfr` tačno `https://suf.purs.gov.rs/verify`."
+      if:
+        properties:
+          source:
+            const: pfr
+        required: [source]
+      then:
+        properties:
+          verificationUrl:
+            const: https://suf.purs.gov.rs/verify
         sdcDateTime:
           type: string
           description: ISO 8601; čuva se lokalno vreme PFR-a do sekunde.

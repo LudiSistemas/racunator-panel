@@ -8,6 +8,7 @@ use RacunatorPanel\Auth\ApiRateLimiter;
 use RacunatorPanel\Kernel\Request;
 use RacunatorPanel\Kernel\Response;
 use RacunatorPanel\Models\Client;
+use RacunatorPanel\Models\Receipt;
 use RacunatorPanel\Repositories\AuditLogRepository;
 use RacunatorPanel\Repositories\ClientRepository;
 use RacunatorPanel\Repositories\ReceiptRepository;
@@ -22,6 +23,8 @@ use RacunatorPanel\Services\KeyGenerator;
  * Ograničenja: 60 zahteva u minutu po ključu (ApiRateLimiter) i dnevni broj prihvaćenih računa po korisniku
  * (settings `api_daily_limit`, podrazumevano 2000; 0 = bez dnevnog limita). Prelazak 50 % i dostizanje dnevnog limita
  * se jednom dnevno upisuju u dnevnik radnji (`api.daily_warning`, `api.daily_limit`).
+ * Polje `source` (`qr` podrazumevano | `pfr`): račun unet po PFR broju ima link tačno https://suf.purs.gov.rs/verify;
+ * kad isti račun kasnije stigne iz QR koda sa pravim linkom, zapis se nadograđuje i računa kao prihvaćen.
  */
 final class ClientApiController
 {
@@ -178,8 +181,18 @@ final class ClientApiController
         if (!is_string($invoice) || !preg_match(self::INVOICE_RE, $invoice)) {
             return [null, 'invoiceNumber: očekuje se oblik XXXXXXXX-XXXXXXXX-N'];
         }
+        // `source` nedostaje (ili je null) → 'qr', kao kod aplikacija pre uvođenja polja.
+        $source = $item['source'] ?? Receipt::SOURCE_QR;
+        if (!is_string($source) || !in_array($source, [Receipt::SOURCE_QR, Receipt::SOURCE_PFR], true)) {
+            return [null, 'source: dozvoljeno je "qr" ili "pfr"'];
+        }
         $url = $item['verificationUrl'] ?? null;
-        if (!is_string($url) || !str_starts_with($url, self::URL_PREFIX) || strlen($url) > self::MAX_URL
+        if ($source === Receipt::SOURCE_PFR) {
+            // Račun unet po PFR broju nema link iz QR koda — jedini dozvoljeni link je zvanična stranica za proveru.
+            if ($url !== Receipt::SUF_VERIFY_URL) {
+                return [null, 'verificationUrl: za source "pfr" mora biti tačno ' . Receipt::SUF_VERIFY_URL];
+            }
+        } elseif (!is_string($url) || !str_starts_with($url, self::URL_PREFIX) || strlen($url) > self::MAX_URL
             || preg_match('/[\s\x00-\x1f\x7f]/', $url) || filter_var($url, FILTER_VALIDATE_URL) === false) {
             return [null, 'verificationUrl: mora biti adresa koja počinje sa ' . self::URL_PREFIX];
         }
@@ -198,6 +211,7 @@ final class ClientApiController
             // Lokalno vreme PFR-a bez delova sekunde i vremenske zone.
             'sdcDateTime' => sprintf('%s-%s-%sT%s:%s:%s', $m[1], $m[2], $m[3], $m[4], $m[5], $m[6]),
             'totalAmountMinor' => $amount,
+            'source' => $source,
         ];
         foreach (['sellerPib', 'buyerPib'] as $field) {
             $v = $item[$field] ?? null;

@@ -1,5 +1,16 @@
 # Izmene
 
+## Neobjavljeno
+
+- Prijem računa unetih u aplikaciji po PFR broju (bez QR koda): novo opciono polje `source` u API-ju (`qr` podrazumevano |
+  `pfr`); za `pfr` link mora biti tačno `https://suf.purs.gov.rs/verify`. Kad isti račun kasnije stigne iz QR koda sa pravim
+  linkom, panel nadograđuje zapis umesto da ga odbije kao duplikat.
+- Migracija baze `0004_receipt_source` (kolona `receipts.source`, postojeći računi dobijaju `qr`).
+- Pregled računa: oznaka „PFR broj" i dugme „Proveri na sajtu Poreske uprave" (stranica za proveru po PFR broju) uz dugme za
+  kopiranje PFR broja; CSV ima novu poslednju kolonu „Izvor" (QR / PFR broj).
+- Ispravna množina u pregledu po mesecima i u zbiru („1 račun", „21 račun", „2 računa", „11 računa").
+- CLI: `php install/cli.php migracije` — primena novih migracija na instaliranom panelu.
+
 ## 0.1.0 — 2026-10-29
 
 Prvo izdanje.

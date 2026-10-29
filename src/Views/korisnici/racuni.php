@@ -1,5 +1,6 @@
 <?php
 use RacunatorPanel\Controllers\Panel\Format;
+use RacunatorPanel\Models\Receipt;
 use function RacunatorPanel\Kernel\e;
 ?>
 <p class="breadcrumbs"><a href="<?= e($u('/korisnici')) ?>">Korisnici</a> › <a href="<?= e($u('/korisnici/' . $client->id)) ?>"><?= e($client->name) ?></a> › Računi</p>
@@ -34,10 +35,18 @@ use function RacunatorPanel\Kernel\e;
       <td data-label="PIB prodavca"><?= e($r->sellerPib ?? '—') ?></td>
       <td data-label="PIB kupca"><?= e($r->buyerPib ?? '—') ?></td>
       <td data-label="Iznos" class="num"><?= e(Format::amount($r->totalAmountMinor)) ?></td>
-      <td data-label="PFR broj" class="pfr"><code><?= e($r->invoiceNumber) ?></code></td>
+      <td data-label="PFR broj" class="pfr"><code id="pfr-<?= e($r->id) ?>"><?= e($r->invoiceNumber) ?></code>
+        <?php if ($r->isPfrEntry()): ?>
+          <span class="badge" title="Račun je unet po PFR broju (bez QR koda)">PFR broj</span>
+        <?php endif; ?>
+      </td>
       <td data-label="Vrsta"><?= e(Format::receiptKind($r->invoiceType, $r->transactionType)) ?></td>
       <td class="actions">
-        <?php if (Format::isSufUrl($r->verificationUrl)): ?>
+        <?php if ($r->isPfrEntry()): ?>
+          <a class="btn btn-small" href="<?= e(Receipt::SUF_VERIFY_URL) ?>" target="_blank" rel="noopener noreferrer"
+             title="Na stranici Poreske uprave ukucajte PFR broj <?= e($r->invoiceNumber) ?>">Proveri na sajtu Poreske uprave</a>
+          <button type="button" class="btn btn-small" data-copy="pfr-<?= e($r->id) ?>">Kopiraj PFR broj</button>
+        <?php elseif (Format::isSufUrl($r->verificationUrl)): ?>
           <a class="btn btn-small" href="<?= e($r->verificationUrl) ?>" target="_blank" rel="noopener noreferrer">Otvori na sajtu Poreske uprave</a>
         <?php else: ?>
           <span class="muted">neispravan link</span>
@@ -47,9 +56,13 @@ use function RacunatorPanel\Kernel\e;
   <?php endforeach; ?>
   </tbody>
   <tfoot>
-    <tr><th colspan="4">Zbir (<?= e(count($receipts)) ?> računa)</th><th class="num"><?= e(Format::amount($total)) ?></th><th colspan="3"></th></tr>
+    <tr><th colspan="4">Zbir (<?= e(Format::receiptCount(count($receipts))) ?>)</th><th class="num"><?= e(Format::amount($total)) ?></th><th colspan="3"></th></tr>
   </tfoot>
 </table>
 </div>
 <p class="hint">Zbir sabira iznose svih računa u mesecu onako kako su primljeni (uključujući eventualne refundacije, označene bojom).</p>
+<?php if (array_filter($receipts, static fn (Receipt $r): bool => $r->isPfrEntry()) !== []): ?>
+<p class="hint">Račun označen sa „PFR broj" unet je u aplikaciji po PFR broju, bez QR koda: dugme „Proveri na sajtu Poreske uprave"
+  otvara zvaničnu stranicu za proveru, gde se ukuca PFR broj (dugme „Kopiraj PFR broj" ga kopira).</p>
+<?php endif; ?>
 <?php endif; ?>

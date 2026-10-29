@@ -50,7 +50,8 @@ curl -s https://domen.rs/panel/u/0f3c…/receipts \
 | Polje | Obavezno | Pravilo |
 |---|---|---|
 | `invoiceNumber` | da | PFR broj, oblik `^[A-Z0-9]{8}-[A-Z0-9]{8}-\d{1,10}$` (npr. `RCVG4AFL-RCVG4AFL-234120`) |
-| `verificationUrl` | da | počinje sa `https://suf.purs.gov.rs/`, do 2048 znakova, bez razmaka |
+| `source` | ne | `"qr"` (podrazumevano kad polje nedostaje ili je `null`) — račun iz QR koda; `"pfr"` — račun unet po PFR broju |
+| `verificationUrl` | da | za `qr`: počinje sa `https://suf.purs.gov.rs/`, do 2048 znakova, bez razmaka; za `pfr`: **tačno** `https://suf.purs.gov.rs/verify` |
 | `sdcDateTime` | da | ISO 8601, npr. `2026-10-24T21:42:31` (dozvoljeni su delovi sekunde i zona — čuva se lokalno vreme PFR-a do sekunde) |
 | `totalAmountMinor` | da | ceo broj ≥ 0, iznos u parama (1.234,56 RSD = `123456`) |
 | `sellerName` | ne | tekst do 200 znakova ili `null` |
@@ -59,11 +60,28 @@ curl -s https://domen.rs/panel/u/0f3c…/receipts \
 
 Nepoznata polja se ignorišu. Mesec u panelu se određuje po `sdcDateTime`.
 
+### Računi uneti po PFR broju (`source: "pfr"`)
+Račun koji korisnik u aplikaciji unese po PFR broju (bez QR koda) nema link sa stavkama, pa aplikacija šalje
+`"source":"pfr"` i `"verificationUrl":"https://suf.purs.gov.rs/verify"` — zvaničnu stranicu na kojoj knjigovođa ukuca
+PFR broj. Bilo koja druga vrednost `verificationUrl` uz `pfr` (i link `…/v/?vl=…`) se odbija. Drugi `source` od `qr`/`pfr`
+se odbija razlogom `source: dozvoljeno je "qr" ili "pfr"`.
+```json
+{"invoiceNumber":"RCVG4AFL-RCVG4AFL-234120","source":"pfr","verificationUrl":"https://suf.purs.gov.rs/verify",
+ "sdcDateTime":"2026-10-24T21:42:31","totalAmountMinor":123456,"sellerName":"ZORA MARKET DOO","sellerPib":"100000000",
+ "buyerPib":"101234567","invoiceType":"Normal","transactionType":"Sale"}
+```
+
+**Nadogradnja zapisa (pfr → qr):** ako panel već ima račun tog korisnika sa istim `invoiceNumber` i `source = pfr`, a stigne
+isti račun sa `source = qr` (ili bez polja) i pravim linkom koji počinje sa `https://suf.purs.gov.rs/v/?vl=`, panel ažurira
+postojeći zapis (`verificationUrl`, `source`, sirovi JSON i ostala polja iz nove stavke; vreme prijema ostaje prvobitno) i
+vraća ga u `accepted`. Svi drugi ponovljeni računi (qr → qr, pfr → pfr, qr → pfr, pfr → qr bez linka `…/v/?vl=…`) idu u
+`duplicates` kao i ranije.
+
 ### Odgovor 200
 ```json
 {"accepted":["RCVG4AFL-RCVG4AFL-234120"],"duplicates":[],"rejected":[{"invoiceNumber":"…","reason":"sdcDateTime: očekuje se ISO 8601, npr. 2026-10-24T21:42:31"}]}
 ```
-- `accepted` — upisani računi.
+- `accepted` — upisani računi (i računi uneti po PFR broju koji su upravo nadograđeni linkom iz QR koda).
 - `duplicates` — računi koje panel već ima za ovog korisnika (isti `invoiceNumber`) ili koji se ponavljaju u istom zahtevu.
   Slanje je idempotentno: aplikacija može bezbedno ponoviti zahtev; duplikat treba smatrati uspešno poslatim.
 - `rejected` — računi koji nisu prošli proveru, sa razlogom (`polje: opis`). `invoiceNumber` je `null` ako ga nije bilo.

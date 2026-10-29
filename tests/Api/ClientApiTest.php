@@ -263,6 +263,119 @@ final class ClientApiTest extends TestCase
         self::assertNull(ClientApiController::validate([1, 2])[0]);
     }
 
+    /** @return array<string,mixed> račun unet po PFR broju (kako ga šalje aplikacija) */
+    private static function pfrReceipt(string $invoice = 'RCVG4AFL-RCVG4AFL-234120', array $override = []): array
+    {
+        return $override + ['source' => 'pfr', 'verificationUrl' => 'https://suf.purs.gov.rs/verify'] + self::receipt($invoice);
+    }
+
+    /** @return array<string,mixed> */
+    private function row(string $invoice): array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM receipts WHERE client_id = ? AND invoice_number = ?');
+        $stmt->execute([$this->client->id, $invoice]);
+        return (array) $stmt->fetch();
+    }
+
+    public function testValidacijaPoljaSource(): void
+    {
+        $data = self::data($this->post(['receipts' => [
+            self::receipt('AAAAAAAA-BBBBBBBB-1'),                                              // bez polja → qr
+            self::receipt('AAAAAAAA-BBBBBBBB-2', ['source' => 'qr']),
+            self::receipt('AAAAAAAA-BBBBBBBB-3', ['source' => null]),                         // null → qr
+            self::pfrReceipt('AAAAAAAA-BBBBBBBB-4'),
+            self::receipt('AAAAAAAA-BBBBBBBB-10', ['source' => 'xyz']),
+            self::receipt('AAAAAAAA-BBBBBBBB-11', ['source' => 'PFR']),
+            self::receipt('AAAAAAAA-BBBBBBBB-12', ['source' => 1]),
+            self::receipt('AAAAAAAA-BBBBBBBB-13', ['source' => ['qr']]),
+            // pfr sa pravim linkom iz QR koda ili bilo kojim drugim osim tačno /verify se odbija.
+            self::pfrReceipt('AAAAAAAA-BBBBBBBB-20', ['verificationUrl' => 'https://suf.purs.gov.rs/v/?vl=A1JDVkc0QUZM']),
+            self::pfrReceipt('AAAAAAAA-BBBBBBBB-21', ['verificationUrl' => 'https://suf.purs.gov.rs/verify/']),
+            self::pfrReceipt('AAAAAAAA-BBBBBBBB-22', ['verificationUrl' => 'https://suf.purs.gov.rs/verify?x=1']),
+            self::pfrReceipt('AAAAAAAA-BBBBBBBB-23', ['verificationUrl' => 'http://suf.purs.gov.rs/verify']),
+            self::pfrReceipt('AAAAAAAA-BBBBBBBB-24', ['verificationUrl' => 'https://SUF.purs.gov.rs/verify']),
+            self::pfrReceipt('AAAAAAAA-BBBBBBBB-25', ['verificationUrl' => null]),
+            self::pfrReceipt('AAAAAAAA-BBBBBBBB-26', ['verificationUrl' => '']),
+        ]]));
+        self::assertSame(['AAAAAAAA-BBBBBBBB-1', 'AAAAAAAA-BBBBBBBB-2', 'AAAAAAAA-BBBBBBBB-3', 'AAAAAAAA-BBBBBBBB-4'], $data['accepted']);
+        $rejected = array_column($data['rejected'], 'reason', 'invoiceNumber');
+        self::assertCount(11, $rejected);
+        foreach ([10, 11, 12, 13] as $n) {
+            self::assertSame('source: dozvoljeno je "qr" ili "pfr"', $rejected['AAAAAAAA-BBBBBBBB-' . $n]);
+        }
+        foreach ([20, 21, 22, 23, 24, 25, 26] as $n) {
+            self::assertSame('verificationUrl: za source "pfr" mora biti tačno https://suf.purs.gov.rs/verify', $rejected['AAAAAAAA-BBBBBBBB-' . $n]);
+        }
+        self::assertSame('qr', $this->row('AAAAAAAA-BBBBBBBB-1')['source']);
+        self::assertSame('qr', $this->row('AAAAAAAA-BBBBBBBB-2')['source']);
+        self::assertSame('qr', $this->row('AAAAAAAA-BBBBBBBB-3')['source']);
+        self::assertSame('pfr', $this->row('AAAAAAAA-BBBBBBBB-4')['source']);
+        self::assertSame('https://suf.purs.gov.rs/verify', $this->row('AAAAAAAA-BBBBBBBB-4')['verification_url']);
+
+        [$ok] = ClientApiController::validate(self::pfrReceipt('AAAAAAAA-BBBBBBBB-5'));
+        self::assertSame('pfr', $ok['source']);
+        self::assertSame('qr', ClientApiController::validate(self::receipt('AAAAAAAA-BBBBBBBB-6'))[0]['source']);
+        $saved = (new PdoReceiptRepository($this->pdo))->forClientMonth($this->client->id, '2026-10');
+        self::assertSame(['qr', 'qr', 'qr', 'pfr'], array_map(static fn ($r) => $r->source, $saved));
+    }
+
+    public function testNadogradnjaPfrUQr(): void
+    {
+        $invoice = 'RCVG4AFL-RCVG4AFL-77';
+        $first = self::data($this->post(['receipts' => [self::pfrReceipt($invoice, ['totalAmountMinor' => 100, 'sellerName' => null])]]));
+        self::assertSame([$invoice], $first['accepted']);
+        $before = $this->row($invoice);
+        self::assertSame('pfr', $before['source']);
+
+        // Isti račun stiže iz QR koda sa pravim linkom → nadogradnja, u odgovoru kao prihvaćen.
+        $link = 'https://suf.purs.gov.rs/v/?vl=A1JDVkc0QUZMUkNWRzRBRkzVkwAAAAAAAAAAAAAAAAAAAA%3D%3D';
+        $qr = self::receipt($invoice, ['source' => 'qr', 'verificationUrl' => $link, 'totalAmountMinor' => 123456,
+            'sellerName' => 'ZORA MARKET DOO', 'sdcDateTime' => '2026-10-24T21:42:31.500']);
+        self::assertSame(['accepted' => [$invoice], 'duplicates' => [], 'rejected' => []], self::data($this->post(['receipts' => [$qr]])));
+        $after = $this->row($invoice);
+        self::assertSame($before['id'], $after['id']);
+        self::assertSame('qr', $after['source']);
+        self::assertSame($link, $after['verification_url']);
+        self::assertSame(123456, (int) $after['total_amount_minor']);
+        self::assertSame('ZORA MARKET DOO', $after['seller_name']);
+        self::assertSame('2026-10-24T21:42:31', $after['sdc_datetime']);
+        self::assertSame($before['received_at'], $after['received_at']);
+        self::assertSame('qr', json_decode((string) $after['raw_json'], true)['source']);
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM receipts')->fetchColumn());
+
+        // Posle nadogradnje: i qr i pfr su obični duplikati, zapis se više ne menja.
+        $again = self::data($this->post(['receipts' => [$qr, self::pfrReceipt($invoice)]]));
+        self::assertSame(['accepted' => [], 'duplicates' => [$invoice, $invoice], 'rejected' => []], $again);
+        self::assertSame('qr', $this->row($invoice)['source']);
+        self::assertSame($link, $this->row($invoice)['verification_url']);
+    }
+
+    public function testOstaliDuplikatiSeNeNadogradjuju(): void
+    {
+        // qr → qr: duplikat kao do sada.
+        $this->post(['receipts' => [self::receipt('AAAAAAAA-BBBBBBBB-1')]]);
+        $dup = self::data($this->post(['receipts' => [self::receipt('AAAAAAAA-BBBBBBBB-1', ['totalAmountMinor' => 1])]]));
+        self::assertSame(['AAAAAAAA-BBBBBBBB-1'], $dup['duplicates']);
+        self::assertSame(123456, (int) $this->row('AAAAAAAA-BBBBBBBB-1')['total_amount_minor']);
+
+        // qr → pfr: nema „vraćanja" na PFR unos.
+        $dup = self::data($this->post(['receipts' => [self::pfrReceipt('AAAAAAAA-BBBBBBBB-1')]]));
+        self::assertSame(['AAAAAAAA-BBBBBBBB-1'], $dup['duplicates']);
+        self::assertSame('qr', $this->row('AAAAAAAA-BBBBBBBB-1')['source']);
+
+        // pfr → pfr: duplikat.
+        $this->post(['receipts' => [self::pfrReceipt('AAAAAAAA-BBBBBBBB-2')]]);
+        self::assertSame(['AAAAAAAA-BBBBBBBB-2'], self::data($this->post(['receipts' => [self::pfrReceipt('AAAAAAAA-BBBBBBBB-2')]]))['duplicates']);
+
+        // pfr → qr bez pravog linka iz QR koda (`/v/?vl=`): duplikat, zapis ostaje PFR unos.
+        foreach (['https://suf.purs.gov.rs/verify', 'https://suf.purs.gov.rs/v/x', 'https://suf.purs.gov.rs/'] as $url) {
+            $dup = self::data($this->post(['receipts' => [self::receipt('AAAAAAAA-BBBBBBBB-2', ['verificationUrl' => $url])]]));
+            self::assertSame(['AAAAAAAA-BBBBBBBB-2'], $dup['duplicates'], $url);
+        }
+        self::assertSame('pfr', $this->row('AAAAAAAA-BBBBBBBB-2')['source']);
+        self::assertSame('https://suf.purs.gov.rs/verify', $this->row('AAAAAAAA-BBBBBBBB-2')['verification_url']);
+    }
+
     /** @return list<array<string,mixed>> */
     private static function batch(int $from, int $count): array
     {

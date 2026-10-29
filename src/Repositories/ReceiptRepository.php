@@ -7,7 +7,11 @@ use RacunatorPanel\Models\Receipt;
 
 interface ReceiptRepository
 {
-    /** Upis ako ne postoji (clientId, invoiceNumber); vraća true ako je upisan, false ako je duplikat. */
+    /**
+     * Upis ako ne postoji (clientId, invoiceNumber); vraća true ako je upisan, false ako je duplikat.
+     * Izuzetak: račun sačuvan sa source = 'pfr' koji stigne ponovo sa source = 'qr' i linkom
+     * `https://suf.purs.gov.rs/v/?vl=…` se nadograđuje podacima nove stavke i vraća true.
+     */
     public function insertIfNew(int $clientId, array $data): bool;
     /** Računi jednog korisnika za mesec `YYYY-MM`, po vremenu rastuće. @return list<Receipt> */
     public function forClientMonth(int $clientId, string $month, int $limit = 1000, int $offset = 0): array;

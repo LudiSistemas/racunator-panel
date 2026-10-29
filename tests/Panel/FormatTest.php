@@ -38,6 +38,19 @@ final class FormatTest extends TestCase
         self::assertFalse(Format::isSufUrl('http://suf.purs.gov.rs/v'));
     }
 
+    public function testBrojRacunaIIzvor(): void
+    {
+        $cases = [0 => '0 računa', 1 => '1 račun', 2 => '2 računa', 4 => '4 računa', 5 => '5 računa', 11 => '11 računa',
+            12 => '12 računa', 14 => '14 računa', 21 => '21 račun', 22 => '22 računa', 101 => '101 račun', 111 => '111 računa',
+            1001 => '1001 račun'];
+        foreach ($cases as $n => $text) {
+            self::assertSame($text, Format::receiptCount($n));
+        }
+        self::assertSame('QR', Format::receiptSource('qr'));
+        self::assertSame('PFR broj', Format::receiptSource('pfr'));
+        self::assertSame('QR', Format::receiptSource(''));
+    }
+
     public function testNaziviRadnjiUDnevniku(): void
     {
         self::assertSame('Instalacija', Format::auditAction('install'));

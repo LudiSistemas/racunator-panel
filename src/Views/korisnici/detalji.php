@@ -22,7 +22,7 @@ use function RacunatorPanel\Kernel\e;
     <ul class="months">
       <?php foreach ($summary as $ym => $s): ?>
         <li><a href="<?= e($u('/korisnici/' . $client->id . '/racuni?mesec=' . rawurlencode((string) $ym))) ?>"><?= e(Format::month((string) $ym)) ?></a>
-          — <?= e($s['count']) ?> računa, <?= e(Format::amount((int) $s['total'])) ?> RSD</li>
+          — <?= e(Format::receiptCount((int) $s['count'])) ?>, <?= e(Format::amount((int) $s['total'])) ?> RSD</li>
       <?php endforeach; ?>
     </ul>
     <?php endif; ?>

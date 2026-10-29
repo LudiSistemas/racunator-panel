@@ -42,6 +42,7 @@ docker run --rm -it -v "$PWD":/app -w /app -p 8000:8000 racunator-panel-dev \
        (new RacunatorPanel\Auth\PasswordHasher())->hash("lozinka-za-razvoj"), "admin", null);
      (new RacunatorPanel\Repositories\PdoSettingsRepository($pdo))->set("accountant_name", "Knjigovodstvo XY");'
    ```
+   Nove migracije na već postojećoj bazi (posle izmene koda): `php install/cli.php migracije`.
 3. Server: `php -S localhost:8000 -t public public/index.php` → <http://localhost:8000/prijava>, provera: `/health`.
 
 Za MySQL: `'db' => ['driver' => 'mysql', 'dsn' => 'mysql:host=127.0.0.1;dbname=panel;charset=utf8mb4', 'user' => '…', 'pass' => '…']`.

@@ -15,12 +15,23 @@ final class InMemoryReceiptRepository implements ReceiptRepository
 
     public function insertIfNew(int $clientId, array $data): bool
     {
+        $source = ($data['source'] ?? Receipt::SOURCE_QR) === Receipt::SOURCE_PFR ? Receipt::SOURCE_PFR : Receipt::SOURCE_QR;
+        $id = null;
+        $receivedAt = gmdate('Y-m-d H:i:s');
         foreach ($this->receipts as $r) {
             if ($r->clientId === $clientId && $r->invoiceNumber === $data['invoiceNumber']) {
-                return false;
+                // Isto pravilo nadogradnje kao u jezgru: pfr → qr sa pravim linkom iz QR koda.
+                $upgrade = $r->source === Receipt::SOURCE_PFR && $source === Receipt::SOURCE_QR
+                    && str_starts_with((string) $data['verificationUrl'], Receipt::SUF_QR_URL_PREFIX);
+                if (!$upgrade) {
+                    return false;
+                }
+                $id = $r->id;
+                $receivedAt = $r->receivedAt;
+                break;
             }
         }
-        $id = $this->nextId++;
+        $id ??= $this->nextId++;
         $this->receipts[$id] = new Receipt(
             $id,
             $clientId,
@@ -33,7 +44,8 @@ final class InMemoryReceiptRepository implements ReceiptRepository
             $data['buyerPib'] ?? null,
             $data['invoiceType'] ?? null,
             $data['transactionType'] ?? null,
-            gmdate('Y-m-d H:i:s'),
+            $receivedAt,
+            $source,
         );
         return true;
     }

@@ -19,6 +19,8 @@ declare(strict_types=1);
  *         — ručno ažuriranje iz ZIP-a sa stranice izdanja (potpis je obavezan); bez ekstenzije sodium potpis ne može
  *         da se proveri, pa je potreban i --sha256-provereno (uporedili ste SHA-256 ZIP-a sa SHA256SUMS izdanja)
  *   php install/cli.php dozvola                      — adresa čarobnjaka sa novim ključem (nova instalacija preko pregledača)
+ *   php install/cli.php migracije                    — primena novih migracija baze na instaliranom panelu (kad su fajlovi
+ *         zamenjeni ručno, bez ažuriranja; idempotentno — bez novih migracija ne radi ništa). Pre toga: `kopija`.
  *
  * Izlazni kod: 0 uspeh, 1 greška, 2 pogrešni argumenti.
  */
@@ -132,6 +134,15 @@ try {
             }
             exit(0);
 
+        case 'migracije':
+            if (!$installer->isInstalled()) {
+                $fail('Panel nije instaliran (nema config.php).');
+            }
+            $migrator = new \RacunatorPanel\Db\Migrator(Connection::open((array) $installer->loadConfig()['db']));
+            $applied = $migrator->migrate();
+            $out('Migracije: ' . (implode(', ', $applied) ?: 'nema novih') . ' (verzija šeme ' . $migrator->currentVersion() . ').');
+            exit(0);
+
         case 'kopija':
         case 'kopije':
         case 'vrati':
@@ -196,7 +207,7 @@ try {
             exit($res['ok'] ? 0 : 1);
 
         default:
-            $fail('Nepoznata komanda „' . $cmd . '" (provera, instaliraj, dozvola, kopija, kopije, vrati, azuriraj).', 2);
+            $fail('Nepoznata komanda „' . $cmd . '" (provera, instaliraj, dozvola, migracije, kopija, kopije, vrati, azuriraj).', 2);
     }
 } catch (\Throwable $e) {
     $fail($e->getMessage());

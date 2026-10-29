@@ -72,6 +72,7 @@ final class ReceiptsController extends BaseController
 
     /**
      * CSV za Excel u srpskom okruženju: UTF-8 sa BOM-om, razdvajač `;`, decimalni zarez, redovi CRLF.
+     * Poslednja kolona „Izvor": „QR" (račun iz QR koda) ili „PFR broj" (unet po PFR broju, link je stranica /verify).
      * @param list<Receipt> $receipts
      */
     public static function buildCsv(array $receipts): string
@@ -84,7 +85,7 @@ final class ReceiptsController extends BaseController
         $row = static function (array $fields) use ($out): void {
             fputcsv($out, $fields, ';', '"', '', "\r\n");
         };
-        $row(['Datum', 'Prodavac', 'PIB prodavca', 'PIB kupca', 'Iznos', 'PFR broj', 'Vrsta računa', 'Vrsta transakcije', 'Link za proveru']);
+        $row(['Datum', 'Prodavac', 'PIB prodavca', 'PIB kupca', 'Iznos', 'PFR broj', 'Vrsta računa', 'Vrsta transakcije', 'Link za proveru', 'Izvor']);
         foreach ($receipts as $r) {
             $row([
                 Format::sdcDateTime($r->sdcDateTime, 'd.m.Y H:i:s'),
@@ -96,6 +97,7 @@ final class ReceiptsController extends BaseController
                 self::safeCell(Format::invoiceType($r->invoiceType)),
                 self::safeCell(Format::transactionType($r->transactionType)),
                 self::safeCell($r->verificationUrl),
+                Format::receiptSource($r->source),
             ]);
         }
         rewind($out);

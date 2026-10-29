@@ -84,7 +84,8 @@ zatražiti od hostinga ekstenziju `sodium` (deo standardnog PHP-a).
 Sa SSH pristupom: `php racunator-panel-install.php`, pa `php install/cli.php azuriraj` (paket i potpis iz
 `storage/tmp/manual-update/`). Ili direktno iz fajlova izdanja: `php install/cli.php azuriraj --paket=racunator-panel-X.Y.Z.zip`
 (potpis se traži u `racunator-panel-X.Y.Z.zip.sig` pored njega ili u `--potpis=`); bez `sodium` je potrebno i
-`--sha256-provereno`. Ostale komande: `php install/cli.php kopija`, `kopije`, `vrati --kopija=<ime>`.
+`--sha256-provereno`. Ostale komande: `php install/cli.php kopija`, `kopije`, `vrati --kopija=<ime>`, `migracije` (primena novih migracija baze
+kad su fajlovi panela zamenjeni ručno, bez ažuriranja; bez novih migracija ne radi ništa — pre toga napravite `kopija`).
 
 Install fajl koji ste otpremili, a ne želite da instalirate, ne ostavljajte na serveru: u `install/` kliknite „Odbaci paket"
 (ili preko FTP-a obrišite `releases/` i `storage/tmp/manual-update*`).

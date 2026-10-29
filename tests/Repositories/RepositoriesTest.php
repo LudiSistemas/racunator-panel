@@ -188,6 +188,41 @@ final class RepositoriesTest extends TestCase
         self::assertNull($repo->findById(9999));
     }
 
+    public function testIzvorINadogradnjaPfrUQr(): void
+    {
+        $c = (new PdoClientRepository($this->pdo))->create('A', KeyGenerator::slug(), 'p', 'h', null);
+        $repo = new PdoReceiptRepository($this->pdo);
+        $pfr = ['source' => 'pfr', 'verificationUrl' => 'https://suf.purs.gov.rs/verify', 'rawJson' => '{"source":"pfr"}']
+            + self::receipt('AAAAAAAA-BBBBBBBB-1', '2026-10-24T21:42:31', 1000);
+        self::assertTrue($repo->insertIfNew($c->id, $pfr));
+        self::assertFalse($repo->insertIfNew($c->id, $pfr), 'pfr → pfr je duplikat');
+        $saved = $repo->forClientMonth($c->id, '2026-10')[0];
+        self::assertSame('pfr', $saved->source);
+        self::assertTrue($saved->isPfrEntry());
+        $this->pdo->exec("UPDATE receipts SET received_at = '2026-10-24 20:00:00'");
+
+        $qr = ['source' => 'qr', 'verificationUrl' => 'https://suf.purs.gov.rs/v/?vl=xyz', 'sellerName' => 'NOVI PRODAVAC',
+            'buyerPib' => null, 'rawJson' => '{"source":"qr"}'] + self::receipt('AAAAAAAA-BBBBBBBB-1', '2026-10-24T21:42:31', 2000);
+        self::assertTrue($repo->insertIfNew($c->id, $qr), 'pfr → qr sa linkom iz QR koda je nadogradnja');
+        $up = $repo->findById($saved->id);
+        self::assertNotNull($up);
+        self::assertSame('qr', $up->source);
+        self::assertFalse($up->isPfrEntry());
+        self::assertSame('https://suf.purs.gov.rs/v/?vl=xyz', $up->verificationUrl);
+        self::assertSame(2000, $up->totalAmountMinor);
+        self::assertSame('NOVI PRODAVAC', $up->sellerName);
+        self::assertNull($up->buyerPib);
+        self::assertSame('2026-10-24 20:00:00', $up->receivedAt, 'vreme prijema ostaje prvobitno');
+        self::assertSame('{"source":"qr"}', $this->pdo->query('SELECT raw_json FROM receipts')->fetchColumn());
+        self::assertFalse($repo->insertIfNew($c->id, $qr), 'qr → qr je duplikat');
+        self::assertFalse($repo->insertIfNew($c->id, $pfr), 'qr → pfr je duplikat');
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM receipts')->fetchColumn());
+
+        // Bez polja `source` upis je 'qr'.
+        self::assertTrue($repo->insertIfNew($c->id, self::receipt('AAAAAAAA-BBBBBBBB-2', '2026-10-25T10:00:00', 1)));
+        self::assertSame('qr', $repo->forClientMonth($c->id, '2026-10')[1]->source);
+    }
+
     public function testDecembarPrelaziGodinu(): void
     {
         $c = (new PdoClientRepository($this->pdo))->create('A', KeyGenerator::slug(), 'p', 'h', null);
