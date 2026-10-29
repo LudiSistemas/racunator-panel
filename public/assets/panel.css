@@ -1,0 +1,214 @@
+/* Računator panel — stilovi bez frameworka. Akcenat: #1F5F8B. */
+
+:root {
+  --accent: #1F5F8B;
+  --accent-dark: #174a6d;
+  --accent-soft: #e8f1f7;
+  --text: #1d2329;
+  --muted: #5d6873;
+  --border: #d5dce2;
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --ok: #1e7b46;
+  --ok-soft: #e4f4ea;
+  --warn: #8a5a00;
+  --warn-soft: #fff4dc;
+  --danger: #b3261e;
+  --danger-soft: #fdecea;
+  --radius: 8px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+a { color: var(--accent); }
+a:hover { color: var(--accent-dark); }
+:focus-visible { outline: 3px solid rgba(31, 95, 139, .45); outline-offset: 2px; }
+
+h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 .75rem; }
+h2 { font-size: 1.2rem; margin: 0 0 .75rem; }
+h3 { font-size: 1.05rem; margin: 1.25rem 0 .5rem; }
+p { margin: 0 0 .9rem; }
+code { font-family: var(--mono); font-size: .9em; background: var(--accent-soft); padding: .1em .35em; border-radius: 4px; word-break: break-all; }
+
+/* Zaglavlje i navigacija */
+.topbar { background: var(--accent); color: #fff; }
+.topbar-inner {
+  max-width: 1200px; margin: 0 auto; padding: .6rem 1rem;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1.5rem;
+}
+.brand { color: #fff; font-weight: 700; font-size: 1.15rem; text-decoration: none; }
+.brand span { font-weight: 400; opacity: .85; }
+.brand:hover { color: #fff; }
+.mainnav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .25rem; align-items: center; }
+.mainnav a, .mainnav .linklike {
+  display: block; color: #fff; text-decoration: none; padding: .35rem .65rem; border-radius: 6px; font-size: .95rem;
+}
+.mainnav a:hover, .mainnav .linklike:hover { background: rgba(255, 255, 255, .15); color: #fff; }
+.mainnav a[aria-current="page"] { background: rgba(255, 255, 255, .22); font-weight: 600; }
+.linklike { background: none; border: 0; font: inherit; cursor: pointer; }
+
+.container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem 2rem; flex: 1; }
+.footer { text-align: center; color: var(--muted); font-size: .85rem; padding: 1rem; border-top: 1px solid var(--border); }
+
+.page-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .75rem; }
+.page-head h1 { margin: 0; }
+.breadcrumbs { font-size: .9rem; color: var(--muted); margin-bottom: .5rem; }
+.muted { color: var(--muted); }
+.hint { color: var(--muted); font-size: .88rem; margin-top: -.2rem; }
+
+/* Kartice i raspored */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; }
+.card.narrow { max-width: 560px; }
+.card.login { margin: 2rem auto; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; align-items: start; }
+.grid-2 > .card { margin-bottom: 0; }
+.grid-2 + .card { margin-top: 1rem; }
+.empty { background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius); padding: 1.5rem; text-align: center; color: var(--muted); }
+details.card > summary { cursor: pointer; font-weight: 600; }
+details.card[open] > summary { margin-bottom: .75rem; }
+
+.kv { display: grid; grid-template-columns: minmax(130px, max-content) 1fr; gap: .4rem 1rem; margin: 0 0 1rem; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+.links { padding-left: 1.2rem; margin: 0; }
+.links li { margin-bottom: .4rem; }
+.months { padding-left: 1.2rem; margin: 0; }
+
+/* Upozorenja */
+.alert { border-radius: var(--radius); padding: .75rem 1rem; margin-bottom: 1rem; border: 1px solid transparent; }
+.alert-success { background: var(--ok-soft); border-color: #b9e0c8; color: #14532d; }
+.alert-error { background: var(--danger-soft); border-color: #f2c4bf; color: #7f1d1d; }
+.alert-warning { background: var(--warn-soft); border-color: #f0d79b; color: #5c3d00; }
+.alert-info { background: var(--accent-soft); border-color: #c4dbea; color: #123a55; }
+
+/* Oznake */
+.badge { display: inline-block; font-size: .78rem; font-weight: 600; padding: .1rem .5rem; border-radius: 999px; background: #e7eaee; color: var(--muted); vertical-align: middle; }
+.badge-ok { background: var(--ok-soft); color: var(--ok); }
+.badge-off { background: var(--danger-soft); color: var(--danger); }
+
+/* Dugmad */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
+  font: inherit; font-size: .95rem; font-weight: 600; line-height: 1.2;
+  padding: .55rem 1rem; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); text-decoration: none; cursor: pointer; white-space: nowrap;
+}
+.btn:hover { background: #eef2f5; color: var(--text); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-dark); border-color: var(--accent-dark); color: #fff; }
+.btn-warning { background: var(--warn-soft); border-color: #e3c070; color: var(--warn); }
+.btn-warning:hover { background: #ffe9b8; color: var(--warn); }
+.btn-danger { background: var(--surface); border-color: #e6aaa4; color: var(--danger); }
+.btn-danger:hover { background: var(--danger-soft); color: var(--danger); }
+.btn-small { padding: .3rem .65rem; font-size: .85rem; }
+summary.btn { list-style: none; }
+summary.btn::-webkit-details-marker { display: none; }
+
+/* Forme */
+.form label { display: block; font-weight: 600; margin: .9rem 0 .3rem; }
+.form label:first-of-type { margin-top: 0; }
+.form input[type="text"], .form input[type="password"], .form input[type="email"], .form input[type="url"],
+.form textarea, .form select, .form-inline select {
+  width: 100%; font: inherit; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--text);
+}
+.form textarea { resize: vertical; }
+.form input:focus, .form textarea:focus, .form select:focus, .form-inline select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(31, 95, 139, .2); }
+.form [aria-invalid="true"] { border-color: var(--danger); }
+.form > .btn, .form-actions { margin-top: 1.1rem; }
+.form-actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.form fieldset { border: 1px solid var(--border); border-radius: 6px; margin: 1rem 0 0; padding: .6rem .9rem .8rem; }
+.form legend { font-weight: 600; padding: 0 .3rem; }
+.form label.choice { font-weight: 400; margin: .35rem 0; display: flex; gap: .5rem; align-items: baseline; }
+.field-error { color: var(--danger); font-size: .9rem; margin: .3rem 0 0; }
+.form-inline { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: 1rem; }
+.form-inline label { font-weight: 600; }
+.form-inline select { width: auto; min-width: 220px; }
+form.inline { display: inline; }
+
+.totp-field { margin-top: 1rem; border: 1px solid var(--border); border-radius: 6px; padding: .5rem .8rem; }
+.totp-field > summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.totp-field[open] > summary { margin-bottom: .6rem; }
+
+/* Tabele */
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 1rem; }
+.table { width: 100%; border-collapse: collapse; font-size: .94rem; }
+.table th, .table td { padding: .6rem .75rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+.table thead th { background: #f0f3f6; font-weight: 600; white-space: nowrap; }
+.table tbody tr:hover { background: #f8fafb; }
+.table tfoot th { background: #f0f3f6; border-bottom: 0; }
+.table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.table .actions { white-space: nowrap; text-align: right; }
+.table .actions form, .table .actions details { display: inline-block; vertical-align: top; margin-left: .25rem; }
+.table tr.inactive td { color: var(--muted); }
+.table tr.refund td { background: #fff8f7; }
+.table code { background: none; padding: 0; }
+.inline-details[open] { display: block; text-align: left; margin-top: .5rem; min-width: 260px; }
+.inline-details[open] .form { margin-top: .5rem; }
+
+/* Opasne radnje */
+.danger-zone { border-color: #ecc9c5; }
+.danger-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .75rem 1.5rem; padding: .75rem 0; border-top: 1px solid var(--border); }
+.danger-row:first-of-type { border-top: 0; padding-top: 0; }
+.danger-row > div { flex: 1 1 320px; }
+.danger-row p { margin: .2rem 0 0; }
+
+/* QR i kartica za štampu */
+.qr { width: 280px; max-width: 100%; margin: 1rem auto; }
+.qr svg { display: block; width: 100%; height: auto; }
+.qr-small { width: 220px; margin-left: 0; }
+.secret { font-size: 1rem; letter-spacing: .02em; }
+.print-card {
+  background: var(--surface); border: 2px dashed var(--border); border-radius: var(--radius);
+  max-width: 420px; margin: 1rem 0 1.25rem; padding: 1.25rem 1.5rem; text-align: center;
+}
+.print-card-accountant { color: var(--accent); font-weight: 700; margin: 0; text-transform: uppercase; letter-spacing: .04em; font-size: .9rem; }
+.print-card-client { font-size: 1.35rem; margin: .25rem 0 0; }
+.print-card-steps { text-align: left; margin: .5rem 0 .75rem; padding-left: 1.3rem; }
+.print-card-note { font-size: .8rem; color: var(--muted); text-align: left; margin: 0; }
+
+/* Telefon: tabele kao kartice */
+@media (max-width: 720px) {
+  h1 { font-size: 1.35rem; }
+  .container { padding: 1rem .75rem 1.5rem; }
+  .mainnav ul { gap: 0; }
+  .mainnav a, .mainnav .linklike { padding: .3rem .5rem; font-size: .9rem; }
+  .table-wrap { border: 0; background: none; overflow: visible; }
+  .table thead { display: none; }
+  .table, .table tbody, .table tr, .table td, .table tfoot, .table tfoot tr, .table tfoot th { display: block; width: 100%; }
+  .table tr { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: .75rem; padding: .4rem .2rem; }
+  .table td { border: 0; padding: .25rem .75rem; text-align: left; }
+  .table td[data-label]::before { content: attr(data-label); display: block; font-size: .78rem; color: var(--muted); font-weight: 600; }
+  .table .num, .table .actions { text-align: left; }
+  .table tfoot th[colspan] { padding: .25rem .75rem; text-align: left; }
+  .kv { grid-template-columns: 1fr; gap: .1rem; }
+  .kv dd { margin-bottom: .5rem; }
+}
+
+/* Štampa: samo kartica sa QR kodom (i sadržaj stranica bez navigacije) */
+@media print {
+  @page { margin: 15mm; }
+  body { background: #fff; color: #000; }
+  .no-print, .topbar, .footer, .alert, .btn { display: none !important; }
+  .container { padding: 0; max-width: none; }
+  .print-card { border: 1.5px solid #000; max-width: 95mm; margin: 0 auto; padding: 8mm; page-break-inside: avoid; }
+  .print-card-accountant { color: #000; }
+  .qr { width: 60mm; margin: 5mm auto; }
+  .card, .table-wrap { border-color: #999; }
+  a { color: #000; text-decoration: none; }
+}
