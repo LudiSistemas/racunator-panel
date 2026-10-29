@@ -45,6 +45,8 @@ final class Format
         'api.rotate_key' => 'Nov ključ API-ja za knjigovođu',
         'api.daily_warning' => 'Korisnik je prešao pola dnevnog limita računa',
         'api.daily_limit' => 'Korisnik je dostigao dnevni limit računa',
+        'api.accountant_auth_fail' => 'Neuspeo pristup API-ju za knjigovođu (pogrešan ključ ili adresa)',
+        'api.accountant_export' => 'Izvoz računa preko API-ja za knjigovođu',
         'install' => 'Instalacija',
         'update.run' => 'Ažuriranje pokrenuto',
         'update.failed' => 'Ažuriranje nije uspelo',

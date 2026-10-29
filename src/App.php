@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace RacunatorPanel;
 
+use RacunatorPanel\Auth\ApiAuthFailLimiter;
 use RacunatorPanel\Auth\ApiDailyLimiter;
 use RacunatorPanel\Auth\ApiRateLimiter;
 use RacunatorPanel\Auth\Authorization;
@@ -13,6 +14,7 @@ use RacunatorPanel\Auth\RateLimiter;
 use RacunatorPanel\Auth\SecretCipher;
 use RacunatorPanel\Auth\SessionGuard;
 use RacunatorPanel\Auth\SessionStore;
+use RacunatorPanel\Controllers\AccountantApiController;
 use RacunatorPanel\Controllers\ClientApiController;
 use RacunatorPanel\Db\Connection;
 use RacunatorPanel\Kernel\Config;
@@ -257,6 +259,11 @@ final class App
             new ApiDailyLimiter($this->db), $this->audit);
         $this->router->get('/u/{slug}/ping', [$api, 'ping']);
         $this->router->post('/u/{slug}/receipts', [$api, 'receipts']);
+
+        // API za knjigovođu (samo čitanje): /api/{slug}/v1/…
+        (new AccountantApiController($this->clients, $this->receipts, $this->settings,
+            new ApiRateLimiter($this->db, AccountantApiController::RATE_LIMIT), new ApiAuthFailLimiter($this->db), $this->audit))
+            ->register($this->router);
     }
 
     private function maySeeVersion(Request $r, bool $dbOk): bool
