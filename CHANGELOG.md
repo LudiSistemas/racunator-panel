@@ -1,6 +1,6 @@
 # Izmene
 
-## Neobjavljeno
+## 0.2.0 — 2026-10-29
 
 - Prijem računa unetih u aplikaciji po PFR broju (bez QR koda): novo opciono polje `source` u API-ju (`qr` podrazumevano |
   `pfr`); za `pfr` link mora biti tačno `https://suf.purs.gov.rs/verify`. Kad isti račun kasnije stigne iz QR koda sa pravim
