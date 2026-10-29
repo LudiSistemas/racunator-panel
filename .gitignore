@@ -1,0 +1,12 @@
+# Planovi PM-a se ne komituju
+/plans/
+# Konfiguracija i podaci instalacije
+/config.php
+/storage/
+# Razvojne zavisnosti i privremeni fajlovi
+/vendor/
+/.phpunit.cache/
+/build/
+/node_modules/
+.DS_Store
+*.local.php
