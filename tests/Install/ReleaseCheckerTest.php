@@ -123,6 +123,16 @@ final class ReleaseCheckerTest extends InstallTestCase
         $this->assertFalse(ReleaseChecker::verifySignature('paket2', $sig, $pk));
         $this->assertFalse(ReleaseChecker::verifySignature('paket', 'nije-base64!', $pk));
         $this->assertNull(ReleaseChecker::verifySignature('paket', $sig, 'kratak'));
-        $this->assertFalse(ReleaseChecker::publicKeyConfigured(), 'placeholder javnog ključa');
+        $this->assertTrue(ReleaseChecker::publicKeyConfigured($pk));
+        $this->assertFalse(ReleaseChecker::publicKeyConfigured('ZAMENITI-JAVNIM-KLJUCEM'));
+    }
+
+    public function testJavniKljucUKoduJeIspravan(): void
+    {
+        $raw = base64_decode(ReleaseChecker::PUBLIC_KEY, true);
+        $this->assertNotFalse($raw, 'PUBLIC_KEY mora biti ispravan base64');
+        $this->assertSame(32, strlen($raw), 'PUBLIC_KEY mora imati 32 bajta (Ed25519)');
+        $this->assertNotSame('ZAMENITI-JAVNIM-KLJUCEM', ReleaseChecker::PUBLIC_KEY);
+        $this->assertTrue(ReleaseChecker::publicKeyConfigured());
     }
 }

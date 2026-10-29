@@ -12,14 +12,14 @@ use RacunatorPanel\Services\ReleaseInfo;
 final class UpdaterTest extends InstallTestCase
 {
     /** @return array{0:TestUpdater,1:array} */
-    private function setUpUpdate(string $from = '1.0.0', string $to = '1.1.0', ?FakeHttpClient $http = null): array
+    private function setUpUpdate(string $from = '1.0.0', string $to = '1.1.0', ?FakeHttpClient $http = null, ?string $publicKey = null): array
     {
         $inst = $this->installation($from);
         $pkg = $inst['root'] . '/releases/' . $to;
         $this->makeApp($pkg, $to, 'novo');
         file_put_contents($pkg . '/.htaccess', '# .htaccess iz paketa');
         $this->writeManifest($pkg);
-        $u = new TestUpdater($inst['root'], $inst['pdo'], $inst['settings'], $inst['audit'], $http, 'https://knjige.rs/panel');
+        $u = new TestUpdater($inst['root'], $inst['pdo'], $inst['settings'], $inst['audit'], $http, 'https://knjige.rs/panel', null, $publicKey);
         return [$u, $inst + ['pkg' => $pkg]];
     }
 
@@ -157,10 +157,14 @@ final class UpdaterTest extends InstallTestCase
         $this->assertFileDoesNotExist($i['root'] . '/storage/maintenance.flag');
     }
 
-    public function testAzuriranjeSaGithubaSaLaznimKlijentom(): void
+    /**
+     * Lažno izdanje 1.1.0 na „GitHub-u": ZIP, SHA256SUMS i (opciono) .sig sa datim sadržajem.
+     * @return array{0:TestUpdater,1:array,2:ReleaseInfo,3:string} updater, instalacija, izdanje, bajtovi ZIP-a
+     */
+    private function githubRelease(?string $publicKey, ?\Closure $sig): array
     {
         $http = new FakeHttpClient();
-        [$u, $i] = $this->setUpUpdate('1.0.0', '1.1.0', $http);
+        [$u, $i] = $this->setUpUpdate('1.0.0', '1.1.0', $http, $publicKey);
         $zip = $this->tmp . '/racunator-panel-1.1.0.zip';
         $this->zipDir($i['pkg'], $zip);
         InstallTestCase::rrmdir($i['root'] . '/releases');
@@ -168,18 +172,69 @@ final class UpdaterTest extends InstallTestCase
         $base = ReleaseChecker::DOWNLOAD_PREFIX . 'v1.1.0/';
         $http->routes[$base . 'racunator-panel-1.1.0.zip'] = ['status' => 200, 'body' => $bytes];
         $http->routes[$base . 'SHA256SUMS'] = ['status' => 200, 'body' => hash('sha256', $bytes) . "  racunator-panel-1.1.0.zip\n"];
-        $http->routes[$base . 'racunator-panel-1.1.0.zip.sig'] = ['status' => 200, 'body' => base64_encode(str_repeat("\0", 64))];
+        if ($sig !== null) {
+            $http->routes[$base . 'racunator-panel-1.1.0.zip.sig'] = ['status' => 200, 'body' => $sig($bytes)];
+        }
         $release = new ReleaseInfo('v1.1.0', '1.1.0', 'v1.1.0', "- novo\n", null, null, $base . 'racunator-panel-1.1.0.zip',
-            strlen($bytes), $base . 'racunator-panel-1.1.0.zip.sig', $base . 'SHA256SUMS', null);
+            strlen($bytes), $sig !== null ? $base . 'racunator-panel-1.1.0.zip.sig' : null, $base . 'SHA256SUMS', null);
+        return [$u, $i, $release, $bytes];
+    }
 
+    /** @return array{0:string,1:string} [javni ključ base64, tajni ključ] */
+    private function keypair(): array
+    {
+        if (!function_exists('sodium_crypto_sign_keypair')) {
+            $this->markTestSkipped('nema sodium');
+        }
+        $kp = sodium_crypto_sign_keypair();
+        return [base64_encode(sodium_crypto_sign_publickey($kp)), sodium_crypto_sign_secretkey($kp)];
+    }
+
+    public function testAzuriranjeSaGithubaSaIspravnimPotpisom(): void
+    {
+        [$pk, $sk] = $this->keypair();
+        [$u, $i, $release] = $this->githubRelease($pk, static fn (string $zip): string => base64_encode(sodium_crypto_sign_detached($zip, $sk)) . "\n");
         $res = $u->updateFromRelease($release, 1, '10.0.0.1');
         $this->assertTrue($res['ok'], (string) $res['error']);
         $this->assertSame('1.1.0', $i['settings']->get('version'));
         $statuses = array_column($res['steps'], 'status', 'step');
-        // Javni ključ je placeholder → potpis se ne može proveriti: upozorenje i zapis u dnevnik radnji.
+        $this->assertSame('ok', $statuses['potpis']);
+        $this->assertNotContains('update.warning', $this->auditActions($i['pdo']));
+        $this->assertDirectoryDoesNotExist($i['root'] . '/storage/tmp/azuriranje-1.1.0');
+    }
+
+    public function testPaketSaPogresnimPotpisomSeOdbija(): void
+    {
+        [$pk] = $this->keypair();
+        [, $tudjiSk] = $this->keypair(); // potpisano drugim ključem
+        [$u, $i, $release] = $this->githubRelease($pk, static fn (string $zip): string => base64_encode(sodium_crypto_sign_detached($zip, $tudjiSk)));
+        $res = $u->updateFromRelease($release, 1, '10.0.0.1');
+        $this->assertFalse($res['ok']);
+        $this->assertStringContainsString('potpis', (string) $res['error']);
+        $this->assertSame('1.0.0', $i['settings']->get('version'));
+        $this->assertStringContainsString('1.0.0 staro', (string) file_get_contents($i['root'] . '/src/marker.txt'));
+        $this->assertDirectoryDoesNotExist($i['root'] . '/_old');
+        $this->assertFileDoesNotExist($i['root'] . '/storage/maintenance.flag');
+    }
+
+    public function testPaketBezPotpisaSeOdbijaKadJeKljucPostavljen(): void
+    {
+        [$pk] = $this->keypair();
+        [$u, $i, $release] = $this->githubRelease($pk, null);
+        $res = $u->updateFromRelease($release, 1, '10.0.0.1');
+        $this->assertFalse($res['ok']);
+        $this->assertStringContainsString('nema digitalni potpis', (string) $res['error']);
+        $this->assertSame('1.0.0', $i['settings']->get('version'));
+    }
+
+    public function testBezJavnogKljucaSamoSha256IUpozorenje(): void
+    {
+        [$u, $i, $release] = $this->githubRelease('ZAMENITI-JAVNIM-KLJUCEM', static fn (string $zip): string => base64_encode(str_repeat("\0", 64)));
+        $res = $u->updateFromRelease($release, 1, '10.0.0.1');
+        $this->assertTrue($res['ok'], (string) $res['error']);
+        $statuses = array_column($res['steps'], 'status', 'step');
         $this->assertSame('warn', $statuses['potpis']);
         $this->assertContains('update.warning', $this->auditActions($i['pdo']));
-        $this->assertDirectoryDoesNotExist($i['root'] . '/storage/tmp/azuriranje-1.1.0');
     }
 
     public function testPogresanSha256SaGithubaSeOdbija(): void

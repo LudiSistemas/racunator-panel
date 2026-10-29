@@ -50,9 +50,10 @@ final class ReleaseChecker
         return version_compare($candidate, $current, '>');
     }
 
-    public static function publicKeyConfigured(): bool
+    /** Javni ključ (podrazumevano PUBLIC_KEY) je ispravan base64 od 32 bajta, a ne placeholder. */
+    public static function publicKeyConfigured(?string $publicKeyB64 = null): bool
     {
-        $raw = base64_decode(self::PUBLIC_KEY, true);
+        $raw = base64_decode($publicKeyB64 ?? self::PUBLIC_KEY, true);
         return $raw !== false && strlen($raw) === 32;
     }
 

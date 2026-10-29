@@ -39,6 +39,8 @@ class Updater
     private $lockHandle = null;
     /** Stanje za povratak ako proces umre usred posla (shutdown). */
     private ?array $inFlight = null;
+    /** Javni Ed25519 ključ za proveru potpisa paketa (base64); podrazumevano ReleaseChecker::PUBLIC_KEY. */
+    protected readonly string $publicKey;
 
     public function __construct(
         protected readonly string $root,
@@ -48,8 +50,10 @@ class Updater
         protected readonly ?HttpClient $http = null,
         protected readonly string $publicUrl = '',
         ?string $storage = null,
+        ?string $publicKey = null,
     ) {
         $this->storage = rtrim($storage ?? $root . '/storage', '/');
+        $this->publicKey = $publicKey ?? ReleaseChecker::PUBLIC_KEY;
     }
 
     public function currentVersion(): string
@@ -366,14 +370,14 @@ class Updater
         $this->step('sha256', 'ok', 'SHA-256 paketa se slaže sa SHA256SUMS.');
 
         $sig = $r->sigUrl !== null ? $this->download($r->sigUrl) : null;
-        $verified = $sig !== null ? ReleaseChecker::verifySignature($zip, $sig) : null;
+        $verified = $sig !== null ? ReleaseChecker::verifySignature($zip, $sig, $this->publicKey) : null;
         if ($verified === false) {
             throw new \RuntimeException('Digitalni potpis paketa nije ispravan — paket je odbijen.');
         }
         if ($verified === null) {
             $why = !function_exists('sodium_crypto_sign_verify_detached') ? 'hosting nema PHP ekstenziju sodium'
-                : (!ReleaseChecker::publicKeyConfigured() ? 'javni ključ za potpis nije postavljen u ovoj verziji' : 'izdanje nema potpis');
-            if ($sig === null && function_exists('sodium_crypto_sign_verify_detached') && ReleaseChecker::publicKeyConfigured()) {
+                : (!ReleaseChecker::publicKeyConfigured($this->publicKey) ? 'javni ključ za potpis nije postavljen u ovoj verziji' : 'izdanje nema potpis');
+            if ($sig === null && function_exists('sodium_crypto_sign_verify_detached') && ReleaseChecker::publicKeyConfigured($this->publicKey)) {
                 throw new \RuntimeException('Izdanje nema digitalni potpis (.sig) — paket je odbijen.');
             }
             $this->step('potpis', 'warn', 'Potpis nije proveren (' . $why . '); oslanjamo se samo na SHA-256.');
